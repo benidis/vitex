@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# vitex working/output artifacts
+work/
+working/
+output/
+out/
+*.mp4
+*.mkv
+*.webm
+*.wav
+*.m4a
+
+# env / secrets
+.env
+
+# tooling
+.mypy_cache/
+.pytest_cache/
+.coverage
+
+# LaTeX build junk
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
