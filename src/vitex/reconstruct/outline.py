@@ -1,0 +1,308 @@
+"""Inventory every item of content in the drafts, then outline the tutorial.
+
+The inventory is the checklist that guarantees nothing is dropped: each draft is
+broken into items (concepts, derivations, results, examples, figures, ...) with
+ids. The outline must place every item id in a section, in a pedagogical order
+with motivation and a step-by-step plan per section. It is checked in code; the
+model gets ``outline_attempts`` tries to fix unplaced or unknown ids, and any
+item still unplaced after that is attached deterministically (to the section
+holding the most items from the same seed unit) — content is never dropped.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import asdict, dataclass, field
+
+from vitex.config import Config
+from vitex.errors import LLMError
+from vitex.llm.client import ClaudeClient
+from vitex.llm.prompts import (
+    INVENTORY_SCHEMA,
+    INVENTORY_SYSTEM,
+    OUTLINE_SCHEMA,
+    inventory_user,
+    outline_retry_user,
+    outline_system,
+    outline_user,
+)
+from vitex.models import Figure, SeedUnit
+from vitex.reconstruct.chapters import dump, generate_structured, pass_key, structured_valid
+from vitex.utils import read_cached, write_cached
+
+log = logging.getLogger("vitex")
+
+
+@dataclass
+class Item:
+    id: str  # e.g. "I3.07": unit 3, item 7
+    unit_id: str
+    kind: str
+    title: str
+    detail: str
+    figures: list[str] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)
+
+    def line(self, detail_chars: int = 400) -> str:
+        detail = " ".join(self.detail.split())
+        if len(detail) > detail_chars:
+            detail = detail[:detail_chars] + "..."
+        return f"{self.id} | {self.kind} | {self.title} | {detail}"
+
+
+@dataclass
+class Section:
+    title: str
+    role: str
+    question: str
+    motivation: str
+    plan: list[str]
+    items: list[str]
+    figures: list[str]
+    leads_to: str
+    new_material: list[str] = field(default_factory=list)
+
+    def spec(self) -> str:
+        plan = "\n".join(f"  {i}. {step}" for i, step in enumerate(self.plan, 1))
+        new = "\n".join(f"  - {m}" for m in self.new_material) or "  (none)"
+        return (
+            f"Title: {self.title}\nRole: {self.role}\nQuestion it answers: {self.question}\n"
+            f"Why the reader needs it now: {self.motivation}\nPlan:\n{plan}\n"
+            f"Bridging/prerequisite material to add:\n{new}\nLeads to: {self.leads_to}"
+        )
+
+
+@dataclass
+class Outline:
+    title: str
+    reader_background: str
+    notation: list[dict]
+    sections: list[Section]
+    storyline: str = ""
+    # Items left out at the author's explicit request: [{"id", "reason"}].
+    excluded: list[dict] = field(default_factory=list)
+
+    def overview(self, mark: int | None = None) -> str:
+        """Section list for prompts; ``mark`` flags the section being worked on."""
+        lines = [f"Storyline: {self.storyline}", f"Reader background: {self.reader_background}"]
+        for i, s in enumerate(self.sections):
+            flag = ">>> " if i == mark else "    "
+            lines.append(f"{flag}{i + 1}. {s.title} [{s.role}] — answers: {s.question} — leads to: {s.leads_to}")
+        return "\n".join(lines)
+
+    def notation_text(self) -> str:
+        return "\n".join(f"  {n.get('symbol', '')}: {n.get('meaning', '')}" for n in self.notation)
+
+    def to_json(self) -> str:
+        return dump(asdict(self))
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Outline":
+        sections = [
+            Section(
+                title=str(s.get("title", "")).strip(),
+                role=str(s.get("role", "core")),
+                question=str(s.get("question", "")),
+                motivation=str(s.get("motivation", "")),
+                plan=[str(p) for p in s.get("plan", [])],
+                items=[str(i).strip() for i in s.get("items", [])],
+                figures=[str(f).strip() for f in s.get("figures", [])],
+                leads_to=str(s.get("leads_to", "")),
+                new_material=[str(m) for m in s.get("new_material", [])],
+            )
+            for s in d.get("sections", [])
+        ]
+        return cls(
+            title=str(d.get("title", "")).strip(),
+            reader_background=str(d.get("reader_background", "")),
+            notation=list(d.get("notation", [])),
+            sections=sections,
+            storyline=str(d.get("storyline", "")),
+            excluded=[e for e in d.get("excluded_items", d.get("excluded", [])) if isinstance(e, dict)],
+        )
+
+
+# ---------------------------------------------------------------------------
+# Inventory
+# ---------------------------------------------------------------------------
+
+
+def build_inventory(
+    client: ClaudeClient, units: list[SeedUnit], drafts: dict[str, str], cfg: Config
+) -> tuple[list[Item], dict[str, str]]:
+    """Return every content item (with global ids) and a summary per unit."""
+    items: list[Item] = []
+    summaries: dict[str, str] = {}
+    cache_dir = cfg.workdir / "drafts"
+
+    def check(data: dict) -> str | None:
+        return None if data.get("items") else "no items extracted"
+
+    for u_idx, unit in enumerate(units, 1):
+        what = f"Inventory {u_idx}/{len(units)} [{unit.id}]"
+        user = inventory_user(unit.source_title, unit.position, drafts[unit.id])
+        cache = cache_dir / f"{unit.id}.items.json"
+        key = pass_key(cfg, "inventory", INVENTORY_SYSTEM, user)
+        cached = read_cached(cache, key, cfg.force)
+        if cached is not None:
+            data = json.loads(cached)
+            log.info("%s: cached (%d items)", what, len(data["items"]))
+        else:
+            data = structured_valid(
+                lambda: generate_structured(
+                    client, cfg, system=INVENTORY_SYSTEM, text=user, schema=INVENTORY_SCHEMA,
+                    description="Record the complete inventory of the draft.", research_allowed=False,
+                ),
+                check,
+                what,
+                cfg.generation_attempts,
+            )
+            write_cached(cache, key, dump(data))
+            log.info("%s: %d items", what, len(data["items"]))
+        summaries[unit.id] = str(data.get("summary", ""))
+        for n, raw in enumerate(data["items"], 1):
+            items.append(
+                Item(
+                    id=f"I{u_idx}.{n:02d}",
+                    unit_id=unit.id,
+                    kind=str(raw.get("kind", "concept")),
+                    title=str(raw.get("title", "")),
+                    detail=str(raw.get("detail", "")),
+                    figures=[str(f) for f in raw.get("figures", [])],
+                    depends_on=[str(d) for d in raw.get("depends_on", [])],
+                )
+            )
+    return items, summaries
+
+
+# ---------------------------------------------------------------------------
+# Outline
+# ---------------------------------------------------------------------------
+
+
+def outline_problems(outline: Outline, items: list[Item], figures: set[str]) -> tuple[list[str], list[str]]:
+    """Return (unplaced item ids, unknown ids/figure names) for an outline.
+
+    Items the outline excluded (allowed only under an author's brief) count as
+    placed.
+    """
+    known = {i.id for i in items}
+    placed = {i for s in outline.sections for i in s.items} | {str(e.get("id")) for e in outline.excluded}
+    used_figs = {f for s in outline.sections for f in s.figures}
+    missing = [i.id for i in items if i.id not in placed]
+    unknown = sorted((placed - known) | (used_figs - figures))
+    return missing, unknown
+
+
+def repair_outline(outline: Outline, items: list[Item], figures: set[str]) -> list[str]:
+    """Make the outline complete in code; return a description of each change.
+
+    Unknown ids and figure names are removed; every unplaced item, and every
+    figure an item uses but no section includes, is attached to the section
+    holding the most items from the same seed unit (or the last core section).
+    """
+    by_id = {i.id: i for i in items}
+    changes: list[str] = []
+    for s in outline.sections:
+        bad = [i for i in s.items if i not in by_id] + [f for f in s.figures if f not in figures]
+        if bad:
+            changes.append(f"removed unknown {bad} from '{s.title}'")
+        s.items = [i for i in s.items if i in by_id]
+        s.figures = [f for f in s.figures if f in figures]
+
+    body = [s for s in outline.sections if s.role not in ("introduction", "summary")] or outline.sections
+
+    def home(item: Item) -> Section:
+        def score(s: Section) -> int:
+            return sum(1 for i in s.items if by_id[i].unit_id == item.unit_id)
+
+        best = max(body, key=score)
+        return best if score(best) > 0 else body[-1]
+
+    placed = {i for s in outline.sections for i in s.items} | {str(e.get("id")) for e in outline.excluded}
+    for item in items:
+        if item.id not in placed:
+            target = home(item)
+            target.items.append(item.id)
+            target.plan.append(f"Cover in full: {item.title}")
+            changes.append(f"attached {item.id} ({item.title}) to '{target.title}'")
+
+    for item in items:
+        for fig in item.figures:
+            if fig in figures and not any(fig in s.figures for s in outline.sections):
+                target = next(s for s in outline.sections if item.id in s.items)
+                target.figures.append(fig)
+                changes.append(f"attached figure {fig} to '{target.title}'")
+    return changes
+
+
+def build_outline(
+    client: ClaudeClient,
+    units: list[SeedUnit],
+    items: list[Item],
+    summaries: dict[str, str],
+    figures: list[Figure],
+    cfg: Config,
+) -> Outline:
+    """Design the tutorial's outline, guaranteed to place every item."""
+    fig_names = {f.name for f in figures}
+    sources = "\n".join(
+        f"- [{u.id}] {u.kind} \"{u.source_title}\", {u.position}: {summaries.get(u.id, '')}" for u in units
+    )
+    fig_text = "\n".join(
+        f"  {f.name} | {f.note.value if f.note else '-'} | {f.note.description if f.note else f.hint}"
+        for f in figures
+    )
+    inventory = "\n".join(i.line() for i in items)
+    system = outline_system(cfg.ground, cfg.guide)
+    user = outline_user(sources, inventory, fig_text, cfg.title)
+
+    cache = cfg.tutorial_dir / "outline.json"
+    key = pass_key(cfg, "outline", system, user, cfg.outline_attempts)
+    cached = read_cached(cache, key, cfg.force)
+    if cached is not None:
+        log.info("Outline: cached")
+        return Outline.from_dict(json.loads(cached))
+
+    def check(data: dict) -> str | None:
+        return None if data.get("sections") else "outline has no sections"
+
+    log.info("Outlining %d items from %d seed units%s...", len(items), len(units), " + research" if cfg.ground else "")
+    text = user
+    outline: Outline | None = None
+    for attempt in range(1, cfg.outline_attempts + 1):
+        data = structured_valid(
+            lambda: generate_structured(
+                client, cfg, system=system, text=text, schema=OUTLINE_SCHEMA,
+                description="Submit the complete outline of the tutorial.", research_allowed=True,
+            ),
+            check,
+            "Outline",
+            cfg.generation_attempts,
+        )
+        outline = Outline.from_dict(data)
+        if not cfg.guide and outline.excluded:
+            # Exclusion is only legitimate when the author's brief asks for it.
+            log.warning("Outline excluded %d item(s) without an author's brief; restoring them", len(outline.excluded))
+            outline.excluded = []
+        missing, unknown = outline_problems(outline, items, fig_names)
+        if not missing and not unknown:
+            break
+        log.warning(
+            "Outline attempt %d/%d: %d unplaced item(s), %d unknown reference(s)",
+            attempt, cfg.outline_attempts, len(missing), len(unknown),
+        )
+        text = user + "\n\n" + outline_retry_user(dump(data), ", ".join(missing), ", ".join(unknown))
+    if outline is None:  # pragma: no cover - loop runs at least once
+        raise LLMError("Outline: no outline produced.")
+
+    for change in repair_outline(outline, items, fig_names):
+        log.warning("Outline fix: %s", change)
+    for e in outline.excluded:
+        log.warning("Outline: item %s left out per the author's brief: %s", e.get("id"), e.get("reason", ""))
+    if cfg.title:
+        outline.title = cfg.title
+    write_cached(cache, key, outline.to_json())
+    log.info("Outline: %d sections — %s", len(outline.sections), " | ".join(s.title for s in outline.sections))
+    return outline

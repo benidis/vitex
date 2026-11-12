@@ -27,9 +27,10 @@ _SENTENCE_END = {".", "?", "!"}
 
 
 class AWSTranscriber:
-    def __init__(self, bucket: str, region: str, poll_seconds: float = 10.0):
+    def __init__(self, bucket: str, region: str, profile: str, poll_seconds: float = 10.0):
         self.bucket = bucket
         self.region = region
+        self.profile = profile  # the only credentials used (VITEX_AWS_PROFILE)
         self.poll_seconds = poll_seconds
 
     def _client(self, service: str):
@@ -40,7 +41,7 @@ class AWSTranscriber:
                 "boto3 is required for the AWS transcriber. Install with:\n"
                 "  uv pip install -e '.[aws]'"
             ) from exc
-        return boto3.client(service, region_name=self.region)
+        return boto3.Session(profile_name=self.profile, region_name=self.region).client(service)
 
     def transcribe(self, audio_path: Path) -> list[Segment]:
         s3 = self._client("s3")

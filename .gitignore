@@ -8,11 +8,13 @@ dist/
 .venv/
 venv/
 
-# vitex working/output artifacts
-work/
-working/
-output/
-out/
+# vitex working/output artifacts (anchored to the repo root so they don't also
+# match the src/vitex/output/ package)
+/work/
+/working/
+/output/
+/out/
+/work_run.log
 *.mp4
 *.mkv
 *.webm

@@ -27,6 +27,15 @@ def test_edge_frames_are_not_dropped():
     assert len(chunks[0].frames) == 2
 
 
+def test_gap_frames_go_to_nearest_chunk_not_the_last():
+    chunks = [_chunk(0, 0, 30), _chunk(1, 40, 70), _chunk(2, 80, 110)]
+    frames = [_frame(0, 32), _frame(1, 38), _frame(2, 35)]  # pause between chunks 0 and 1
+    assign_frames(chunks, frames, max_images_per_chunk=10)
+    assert [f.index for f in chunks[0].frames] == [0]
+    assert [f.index for f in chunks[1].frames] == [2, 1]  # 35 is a tie -> later chunk
+    assert chunks[2].frames == []
+
+
 def test_subsample_respects_cap_and_keeps_order():
     chunks = [_chunk(0, 0, 100)]
     frames = [_frame(i, i) for i in range(20)]

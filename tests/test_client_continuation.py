@@ -18,9 +18,9 @@ def _make_client(scripted, capture=None):
     client.model = "test-model"
     state = {"n": 0}
 
-    def fake_create(*, model, max_tokens, system, messages):
-        if capture is not None and messages[-1]["role"] == "assistant":
-            capture.append(messages[-1]["content"])
+    def fake_create(*, model, max_tokens, system, messages, **kw):
+        if capture is not None and len(messages) > 1:
+            capture.append(messages[-1]["content"][0]["text"])
         text, stop = scripted[state["n"]]
         state["n"] += 1
         return SimpleNamespace(
@@ -63,8 +63,10 @@ def test_seam_never_splits_a_command_mid_token():
     assert "\\line width" not in out  # the corruption we are guarding against
     assert "\\linewidth]{f.jpg}" in out
     assert out.count("\\includegraphics") == 1  # partial line dropped, not duplicated
-    # The prefill for the continuation retreated to the last complete line.
-    assert captured == ["\\begin{figure}\n\\centering"]
+    # The continuation is a new user turn (no assistant prefill) quoting the text
+    # up to the last complete line only.
+    assert len(captured) == 1
+    assert "<<<PARTIAL\n\\begin{figure}\n\\centering\nPARTIAL>>>" in captured[0]
 
 
 def test_tool_loop_executes_tools_then_returns_final_text():
@@ -83,7 +85,7 @@ def test_tool_loop_executes_tools_then_returns_final_text():
     client.model = "m"
     seen = {"calls": [], "tools_arg": []}
 
-    def fake_create(*, model, max_tokens, system, messages, tools=None):
+    def fake_create(*, model, max_tokens, system, messages, tools=None, **kw):
         seen["tools_arg"].append(tools)
         return scripted[len(seen["calls"])] if len(seen["calls"]) < len(scripted) else scripted[-1]
 
@@ -119,7 +121,7 @@ def test_stops_at_max_continuations_without_infinite_loop():
     client.model = "m"
     calls = {"n": 0}
 
-    def always_truncated(*, model, max_tokens, system, messages):
+    def always_truncated(*, model, max_tokens, system, messages, **kw):
         calls["n"] += 1
         return SimpleNamespace(
             content=[SimpleNamespace(type="text", text=f"line{calls['n']}\n")],

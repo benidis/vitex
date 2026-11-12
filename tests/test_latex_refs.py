@@ -1,6 +1,6 @@
 """Tests for reading references back out of a generated document."""
 
-from vitex.models import Frame
+from vitex.models import Figure
 from vitex.output.latex import (
     cite_keys,
     insert_bibliography,
@@ -46,8 +46,7 @@ def test_stage_figures_wipes_stale_frames(tmp_path):
 
     src = tmp_path / "src.jpg"
     src.write_bytes(b"new")
-    frame = Frame(index=0, timestamp=0.0, path=src, label="")
+    stage_figures([Figure(name="yt-x_frame_00001.jpg", path=src)], tmp_path)
 
-    stage_figures([frame], tmp_path)
-
-    assert {p.name for p in figures.iterdir()} == {"src.jpg"}
+    # Staged under the figure's unique name, which is what the document references.
+    assert {p.name for p in figures.iterdir()} == {"yt-x_frame_00001.jpg"}

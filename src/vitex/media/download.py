@@ -1,13 +1,17 @@
-"""Resolve the pipeline source into a local video file plus metadata.
+"""Resolve a video source into a local video file plus metadata.
 
 Accepts either a local path (used as-is) or a URL (downloaded with yt-dlp).
+Each source gets its own work directory (``<workroot>/<slug>/``) named after
+its identity, so several videos can be processed side by side and re-runs with
+the same sources reuse each one's cached artifacts.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
-import shutil
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +31,8 @@ _SOURCE_MARKER = "source.json"
 def _stale_cache(workdir: Path, identity: str) -> bool:
     """True if work/ was last built from a *different* source than ``identity``."""
     marker = workdir / _SOURCE_MARKER
+    if not workdir.exists():
+        return False
     if not marker.exists():
         # No marker: either a fresh work dir, or one from before this guard
         # existed. Treat a non-empty dir as stale so we never reuse mystery
@@ -45,12 +51,21 @@ def _clear_video(workdir: Path) -> None:
             p.unlink()
 
 
+def _slug(prefix: str, text: str, unique: str) -> str:
+    """Filesystem- and LaTeX-safe source id, e.g. ``yt-Y-o545eYjXM``."""
+    clean = re.sub(r"[^A-Za-z0-9-]+", "-", text).strip("-")[:30]
+    digest = hashlib.sha1(unique.encode()).hexdigest()[:6]
+    return f"{prefix}-{clean}-{digest}" if clean else f"{prefix}-{digest}"
+
+
 @dataclass
 class SourceInfo:
     video_path: Path
     title: str
     description: str
     duration: float  # seconds; 0.0 if unknown
+    slug: str  # unique source id; also the figure-name prefix of its frames
+    workdir: Path  # this source's own cache directory
     changed: bool = False  # True if the source differs from the cached work dir
 
 
@@ -76,10 +91,12 @@ def _probe_duration(video_path: Path) -> float:
         return 0.0
 
 
-def _resolve_local(path: Path, workdir: Path) -> SourceInfo:
+def _resolve_local(path: Path, workroot: Path) -> SourceInfo:
     if not path.exists():
         raise DownloadError(f"Local source not found: {path}")
     identity = f"file:{path.resolve()}"
+    slug = _slug("file", path.stem, identity)
+    workdir = workroot / slug
     changed = _stale_cache(workdir, identity)
     workdir.mkdir(parents=True, exist_ok=True)
     write_json(workdir / _SOURCE_MARKER, {"identity": identity, "path": str(path)})
@@ -88,14 +105,15 @@ def _resolve_local(path: Path, workdir: Path) -> SourceInfo:
         title=path.stem,
         description="",
         duration=_probe_duration(path),
+        slug=slug,
+        workdir=workdir,
         changed=changed,
     )
 
 
-def _resolve_url(url: str, workdir: Path, force: bool) -> SourceInfo:
+def _resolve_url(url: str, workroot: Path, force: bool) -> SourceInfo:
     ytdlp = require_tool("yt-dlp")
     require_tool("ffmpeg")  # needed by yt-dlp to merge video+audio
-    workdir.mkdir(parents=True, exist_ok=True)
 
     # Fetch metadata first (cheap, no download) so we can identify the source
     # *before* touching the possibly-stale cached video file.
@@ -113,7 +131,11 @@ def _resolve_url(url: str, workdir: Path, force: bool) -> SourceInfo:
             metadata = candidate
             break
 
-    identity = f"youtube:{metadata.get('id')}" if metadata.get("id") else f"url:{url}"
+    video_id = str(metadata.get("id") or "")
+    identity = f"youtube:{video_id}" if video_id else f"url:{url}"
+    slug = f"yt-{re.sub(r'[^A-Za-z0-9-]+', '-', video_id)}" if video_id else _slug("url", "", identity)
+    workdir = workroot / slug
+    workdir.mkdir(parents=True, exist_ok=True)
     changed = _stale_cache(workdir, identity)
 
     # If the cached video belongs to a different source (or --force), delete it
@@ -156,21 +178,24 @@ def _resolve_url(url: str, workdir: Path, force: bool) -> SourceInfo:
         title=str(metadata.get("title") or video_path.stem),
         description=str(metadata.get("description") or ""),
         duration=duration,
+        slug=slug,
+        workdir=workdir,
         changed=changed,
     )
 
 
-def resolve_source(source: str, workdir: Path, force: bool = False) -> SourceInfo:
+def resolve_source(source: str, workroot: Path, force: bool = False) -> SourceInfo:
     """Return a :class:`SourceInfo` for a local path or a downloadable URL.
 
-    ``SourceInfo.changed`` is True when ``workdir`` was last built from a
-    different source; callers should then invalidate all cached artifacts.
+    The source's artifacts live in ``SourceInfo.workdir`` under ``workroot``.
+    ``SourceInfo.changed`` is True when that dir was last built from a different
+    source; callers should then invalidate its cached artifacts.
     """
     p = Path(source)
     if p.exists():
         log.info("Using local video: %s", p)
-        return _resolve_local(p, workdir)
+        return _resolve_local(p, workroot)
     if source.startswith(("http://", "https://", "www.")):
-        log.info("Downloading video: %s", source)
-        return _resolve_url(source, workdir, force)
+        log.info("Resolving video: %s", source)
+        return _resolve_url(source, workroot, force)
     raise DownloadError(f"Source {source!r} is neither an existing file nor an http(s) URL.")

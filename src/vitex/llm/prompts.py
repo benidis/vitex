@@ -1,224 +1,725 @@
-"""Prompt templates for the Claude passes: draft, integrate, bibliography, repair.
+"""Prompt templates for every Claude pass.
 
-The contract these encode: produce a COMPLETE, self-contained, authoritative
-technical tutorial that uses the video as a seed but is not bound to its exact
-words. It is intuition-first (problem -> intuition/analogy -> math, never a bare
-run of equations) and figure-rich (include every frame that teaches, filtering
-only for quality). Clarifications and missing background are woven directly into
-the prose (never as side-notes). Claims are grounded in the literature via
-research tools while writing, and cited with ``\\cite{...}``; a later pass turns
-those citations into a real bibliography.
+The contract they encode, shared through ``TUTORIAL_STANDARD``, ``SEED_RULES``
+and the research rules:
+
+* The product is a TUTORIAL — not a summary, survey, or catalogue of methods. A
+  reader with general technical background but no knowledge of the topic must be
+  able to understand all of it, front to back, with no other material: problems
+  are set up before solutions, every derivation is step by step, every symbol is
+  defined, nothing appears out of the blue, and each section flows into the next.
+* Videos and documents are SEEDS. Everything of substance in every seed must
+  reach the tutorial — fact-checked against the literature, corrected where
+  wrong, and expanded — so the result is more complete and more correct than any
+  single source.
+
+Passes: frame triage -> per-seed draft -> content inventory -> outline ->
+section writing -> review/revision -> bibliography -> LaTeX repair.
 """
 
 from __future__ import annotations
 
-from vitex.models import Chunk
-
 # ---------------------------------------------------------------------------
-# Pass 1: per-chunk draft (vision + transcript + research tools -> LaTeX body)
+# Shared rules
 # ---------------------------------------------------------------------------
 
-CHAPTER_SYSTEM = r"""
-You are an expert technical author writing one section of a rigorous,
-self-contained tutorial. A segment of an educational video is your SEED: you get
-its timestamped transcript and the frames shown on screen. Your job is to write
-the definitive written treatment of that material — better than the video.
+TUTORIAL_STANDARD = r"""
+THE STANDARD THE TUTORIAL MUST MEET
+It is a TUTORIAL — not a summary, not a survey, not a gathering of methods. The
+reader has general technical maturity (comfortable with undergraduate linear
+algebra, calculus, probability, and programming) but has NEVER studied this
+topic. Reading front to back, with no other material and without the source
+videos or documents, they must understand all of it.
+1. Problem first. Introduce every idea through the problem it solves, stated in
+   terms the reader already understands from earlier material. Set the problem up
+   fully — the setting, what is given, what is wanted, the assumptions, and why
+   the obvious approach falls short — before presenting the solution.
+2. Intuition, then formalism. Explain the idea in words (with a concrete example
+   or analogy where it helps), then give the precise math, then tie every symbol
+   back to the intuition.
+3. No logical jumps. Derive every result step by step, showing each intermediate
+   expression and saying what was done (a substitution, a named identity,
+   linearity of expectation, ...) and why. Never write "it can be shown", "it is
+   easy to see", "after some algebra", and never jump from setup to result.
+4. No assumed knowledge of the topic. Define every term and symbol at its first
+   use: what it is, its type/shape/units, and its role. If a tool from outside
+   the topic is needed (an inequality, a data structure, an optimization trick),
+   explain it briefly where it is first needed.
+5. Nothing out of the blue. Every section and every method appears because the
+   reader now needs it: first state the question or limitation, arising from
+   what came before, that motivates it. Never introduce a method just to list it.
+6. Flow. Open each section by saying where we are and what question it answers;
+   close it by stating what we now know and what problem remains — which the next
+   section picks up. Use one consistent notation throughout.
+7. Concrete. Use worked examples with actual numbers or small cases; walk through
+   algorithms on a small input; make shapes and sizes explicit.
+8. Depth follows difficulty, NOT the source. You are responsible for the reader
+   understanding every idea, however well or badly a source explained it. Judge
+   each idea by what a newcomer needs to truly understand it — never by how many
+   minutes a video spent on it or how many lines a document gave it. When a
+   source mentions something in passing, rushes through it, skips steps, or
+   explains it poorly, supply the full treatment yourself: the problem setup,
+   the intuition, every derivation step, and a worked example. A short paragraph
+   on a substantial idea is a failure, even if that is all the source offered.
+9. Build up. Easier before harder, concrete before abstract, the special case
+   before the general one. Where it teaches best, follow the arc: the problem,
+   the natural first attempt, exactly why it falls short, then the better
+   solution. Every new idea rests only on what the reader already has.
+10. Detail over brevity. When in doubt, explain more. Length is never a concern;
+   gaps in understanding are. The test for every paragraph: could the reader
+   follow it with only what came before?
+""".strip()
 
-Write a real tutorial, not a transcript:
-- Lead with INTUITION, not equations. For each concept follow this order: the
-  PROBLEM it solves -> the intuition or a concrete ANALOGY for the solution ->
-  then the math, tying every symbol back to the picture. Never present a run of
-  equations one after another with no connecting explanation. A reader with no
-  background must be able to follow how each result is derived, what benefit it
-  brings, and the idea behind it — without struggling.
-- You are NOT bound to the speaker's exact words, order, or phrasing. Reorganize
-  for a reader, fix misstatements, and use standard terminology and notation.
-- When something needs more explanation than the video gave, ADD it directly in
-  the main text as if it were always part of the tutorial. Do NOT label additions
-  as asides, editor's notes, or "added for clarity" — just teach it well.
-- Fill gaps so the section stands on its own: motivate each idea, define every
-  symbol at first use (name, meaning, type), give the intuition behind each
-  equation, and expand derivations step by step (never jump from setup to result).
-- Add background the video assumes but a learner may lack, when it aids the flow.
-- If the video only names or gestures at an important method, theorem, or result,
-  give it the full treatment it deserves (statement, intuition, step-by-step
-  derivation), and bring in closely related essential work on the topic when it
-  makes the section more complete — as long as it is standard and you ground it.
-  Completeness and correctness of the topic matter more than fidelity to how much
-  the video happened to cover.
+SEED_RULES = r"""
+HOW TO TREAT THE SOURCES
+The videos and documents are SEEDS, not the product. The result must be more
+complete, more detailed, and more correct than any of them.
+- Keep EVERYTHING of substance from every seed: every concept, definition,
+  equation, derivation, result, number, example, figure, comparison, caveat, and
+  insight. Nothing a source teaches may be lost or compressed away.
+- Fact-check all of it. Where a source is wrong, imprecise, ambiguous, or cut off,
+  state the correct version as plain fact (do not tell the reader the source was
+  wrong, and never write "the video says") and cite the source of record.
+- Expand: add the motivation, intermediate steps, background, and worked
+  examples the sources skipped. A source's brevity on a point is never a reason
+  for yours.
+- Sources are uneven: fragmentary, out of order, repetitive, rushed in places,
+  and mixing setup with solutions. Merge overlapping material into one best
+  treatment, fill the gaps, and choose the most educational order and
+  presentation yourself — no source's order or phrasing is a constraint.
+""".strip()
 
-Ground it in the literature (you have research tools):
-- Use arxiv_search / web_search / fetch_url to confirm formulas, names, and
-  attributions, and to find the primary sources for the ideas you present
-  (e.g. the papers that introduced a method). Prefer arXiv for ML/math.
-- Cite sources inline with \cite{key} using a descriptive key like
-  schulman2017ppo or shao2024deepseekmath. Reuse the same key for the same work.
-  Do not fabricate a citation; look it up. A later pass builds the bibliography
-  from your \cite keys, so you do NOT write a references list here.
-- State results as established facts grounded in the sources — do not hedge with
-  "the video says" or "this could not be verified". If the video was ambiguous
-  or cut off, use the source of record to state the correct version.
-- Be honest about provenance. If the video uses a pedagogical or illustrative
-  device (a simplified example, or a technique borrowed from other work to make
-  a point), attribute it to its real source and do NOT present it as something
-  the primary paper claims. Ground the enrichment in its own citation, and say
-  plainly when it is illustrative rather than what the system actually does.
 
-Figures — include everything that teaches; filter only for quality:
-- You are shown candidate frames. INCLUDE every frame that genuinely helps a
-  reader understand the material — especially architecture and mechanism
-  diagrams, worked numerical examples, and comparison tables. Err toward MORE
-  such figures, not fewer: if the video spent time on a diagram, it is almost
-  always worth reproducing and explaining. A figure-rich tutorial is a goal,
-  not a risk.
-- Exclude ONLY low-value or low-quality frames: title/intro/outro frames,
-  talking-head frames, near-duplicates (keep the single clearest of a set),
-  purely decorative slides, and any frame whose key content (e.g. an equation)
-  is cut off, cropped, blurry, mid-transition, or otherwise illegible.
-- Every figure you include MUST earn its place with a caption that explains what
-  it shows AND why it matters to the surrounding argument; refer to it from the
-  prose. Do not drop in a figure without discussing it.
-- If a frame's content is valuable but the frame itself is poor (cut off, blurry,
-  mid-transition), do NOT embed it — instead reconstruct that content faithfully
-  in the text: typeset the full equation yourself, or describe the diagram.
-- Reference only figure files from the provided list, each at most once:
+def brief_block(guide: str | None) -> str:
+    """The commissioning author's brief, appended to every writing prompt."""
+    if not guide or not guide.strip():
+        return ""
+    return f"""
+
+AUTHOR'S BRIEF (from the person commissioning this tutorial — follow it)
+{guide.strip()}
+
+The brief sets the tutorial's scope, focus, emphasis, audience, and any special
+instructions; where it conflicts with the defaults above, the brief wins. The
+standard for explanation (problem first, no jumps, depth by difficulty, flow)
+always applies. Seed content is kept unless the brief explicitly asks to leave
+something out."""
+
+_RESEARCH_GROUNDED = r"""
+RESEARCH AND CITATIONS
+- Use the research tools (arxiv_search, web_search, fetch_url) to verify every
+  nontrivial claim, formula, number, and attribution, and to find the primary
+  source for each idea (the paper that introduced it). Prefer arXiv for ML, math,
+  and CS. Research thoroughly — checking is worth the time.
+- Cite with \cite{key}, using descriptive keys such as vaswani2017attention;
+  reuse the same key for the same work. Never invent a citation — look it up. Do
+  not write a bibliography; a later pass builds it from the keys.
+- State verified results as established facts. Be honest about provenance: if a
+  source used a simplified or illustrative device, present it as illustrative
+  and attribute it to its real origin.
+""".strip()
+
+_RESEARCH_OFFLINE = r"""
+CITATIONS (no research tools in this run)
+- Rely only on well-established knowledge you are certain of; where a seed makes
+  a claim you cannot be sure of, state only what you are sure is correct.
+- Cite with \cite{key} (descriptive keys such as vaswani2017attention) only for
+  works you are certain exist; do not write a bibliography.
+""".strip()
+
+LATEX_RULES = r"""
+LATEX
+- Available: amsmath, amssymb, amsthm, mathtools, graphicx, booktabs, xcolor,
+  listings, algorithm, algpseudocode, hyperref; theorem-like environments
+  definition, example, theorem, and proof. Use nothing else: no other packages
+  and no custom macros.
+- Display math with equation/align or \[...\], never $$. Code in lstlisting.
+- Algorithms (pseudocode) in \begin{algorithm}[ht]\caption{...}\label{alg:...}
+  \begin{algorithmic}[1] ... \end{algorithmic}\end{algorithm}, using
+  \Require, \Ensure, \State, \For/\EndFor, \While/\EndWhile, \If/\EndIf,
+  \Comment{...}.
+- Figures, with FILE exactly one of the provided figure file names (never
+  construct or alter a file name), each used at most once and discussed in the
+  text:
       \begin{figure}[ht]\centering
-      \includegraphics[width=0.8\linewidth]{FIGFILE}
-      \caption{Explain what it shows and why it matters.}\label{fig:...}
+      \includegraphics[width=0.8\linewidth]{FILE}
+      \caption{What it shows and why it matters here.}\label{fig:...}
       \end{figure}
-
-Output format:
-- Emit a LaTeX BODY FRAGMENT only: start at \section{...}; no \documentclass,
-  no preamble, no \begin{document}, no bibliography.
-- Use amsmath (equation, align, ...). Use \[...\] or environments, never $$.
-- Return raw LaTeX only. No markdown fences, no commentary before or after.
+- Raw LaTeX only: no markdown fences, no commentary before or after.
 """.strip()
 
 
-def chapter_user(chunk: Chunk, title: str, chapter_no: int, total: int) -> str:
-    """Assemble the user text for one chapter draft."""
-    if chunk.frames:
-        figure_lines = "\n".join(
-            f"  - file: {f.path.name} | shown at {f.timestamp_text}" for f in chunk.frames
+def research_rules(ground: bool) -> str:
+    return _RESEARCH_GROUNDED if ground else _RESEARCH_OFFLINE
+
+
+DRAFT_END = "% END OF DRAFT"
+SECTION_END = "% END OF SECTION"
+
+
+# ---------------------------------------------------------------------------
+# Frame triage (vision): rate every distinct frame of a video
+# ---------------------------------------------------------------------------
+
+TRIAGE_SYSTEM = r"""
+You are curating frames from an educational video for an illustrated written
+tutorial. You get a batch of consecutive distinct frames from the video, each
+preceded by a [FIGURE name] marker, plus the narration around each frame. Assess
+EVERY frame in the batch:
+- kind: diagram | equation | table | plot | code | example | text_slide | title |
+  talking_head | transition | other
+- legible: can the key content be read clearly?
+- complete: is the content complete — not mid-build, mid-transition, cropped,
+  or cut off?
+- value (0-10): how much a reader of the written tutorial gains from seeing THIS
+  image. 9-10: a core diagram, mechanism, derivation, or worked example the
+  narration is built around. 6-8: a useful supporting visual (table, plot, code,
+  equation slide). 3-5: marginal (bullet text the narration fully covers, or only
+  partly relevant). 0-2: no teaching value (title card, talking head,
+  transition, decorative, blank).
+- superseded_by: the name of a LATER frame in this batch that is the SAME slide
+  or diagram and contains EVERYTHING this frame shows (e.g. the finished version
+  of a slide being built up step by step), else null. A later frame on a related
+  topic, or one that shows a different diagram, does NOT supersede — when in
+  doubt, use null.
+- description: 1-3 sentences on what the frame shows.
+- text: all legible text, equations (as LaTeX), and code on the frame.
+- reason: one sentence justifying the value.
+""".strip()
+
+TRIAGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "frames": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "kind": {"type": "string"},
+                    "legible": {"type": "boolean"},
+                    "complete": {"type": "boolean"},
+                    "value": {"type": "integer", "minimum": 0, "maximum": 10},
+                    "superseded_by": {"type": ["string", "null"]},
+                    "description": {"type": "string"},
+                    "text": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["name", "kind", "legible", "complete", "value", "description", "text", "reason"],
+            },
+        }
+    },
+    "required": ["frames"],
+}
+
+
+def triage_user(video_title: str, frame_lines: str) -> str:
+    return f"""
+Video: {video_title}
+
+Assess every frame below (one entry per frame, using its exact name). Each frame
+is listed with the narration around it; the images follow, each after its
+[FIGURE name] marker.
+
+{frame_lines}
+""".strip()
+
+
+# ---------------------------------------------------------------------------
+# Pass 1: per-seed draft (fact-checked, complete source material in LaTeX)
+# ---------------------------------------------------------------------------
+
+
+def draft_system(ground: bool, guide: str | None = None) -> str:
+    return f"""
+You are an expert technical author preparing the complete, fact-checked material
+for one part of a tutorial. You are given one SEED UNIT: a slice of an
+educational video (timestamped transcript, the most valuable frames as images,
+and a timeline of everything shown on screen) or a part of an existing document.
+
+Your draft is the raw material a later pass organizes into the final tutorial,
+so COMPLETENESS and CORRECTNESS come first: everything the seed teaches must be
+in your draft — verified, corrected where needed, and explained to the standard
+below. Write it as real tutorial prose (not notes), in LaTeX.
+
+The final tutorial can only be as deep as this material. Wherever the seed
+rushes through an idea, only names it, skips steps, or explains it poorly, give
+that idea its full treatment HERE — problem setup, intuition, every derivation
+step, a worked example — sized to its difficulty, not to the seed's coverage.
+
+{TUTORIAL_STANDARD}
+
+{SEED_RULES}
+
+{research_rules(ground)}
+
+FIGURES
+- The attached frames were pre-selected by a vision model as the most valuable
+  visuals of this segment. Include each one that teaches something, with a
+  caption, and discuss it in the text; skip one only if it truly duplicates
+  another you include.
+- The on-screen timeline lists everything shown during the segment (transcribed
+  by a vision model — verify it). Use its content even for frames that are not
+  attached: typeset the equations, rebuild tables, describe diagrams.
+
+{LATEX_RULES}
+
+OUTPUT
+A LaTeX body fragment that starts with \\section{{...}} (subsections as needed;
+no preamble, no \\begin{{document}}, no bibliography) and ends with the line
+{DRAFT_END}{brief_block(guide)}
+""".strip()
+
+
+def draft_user(
+    *,
+    kind: str,
+    source_title: str,
+    position: str,
+    text: str,
+    figure_lines: str,
+    visual_notes: str,
+) -> str:
+    if kind == "video":
+        intro = (
+            f"Seed: video \"{source_title}\", {position}.\n"
+            "Below: the frames attached as images (by file name), the on-screen timeline, "
+            "and the timestamped transcript."
         )
-        figure_block = (
-            "Candidate frames (each attached below after its [FIGURE ...] marker). "
-            "Include every frame that truly helps a reader — err toward more "
-            "mechanism/diagram/example figures, not fewer — and exclude only "
-            "low-value or illegible ones; reconstruct anything cut off in text "
-            "instead. Use the file name as FIGFILE:\n"
-            + figure_lines
-        )
+        body_label = "Timestamped transcript (a seed, not a script to copy)"
     else:
-        figure_block = "No frames are available for this section."
-
+        intro = (
+            f"Seed: document \"{source_title}\", {position}.\n"
+            "This is part of an existing written document. Keep ALL of its content "
+            "(every section, equation, example, and figure), fact-check it, fix what is "
+            "wrong, and bring every explanation up to the standard."
+        )
+        body_label = "Document text"
+    figures = figure_lines or "(none)"
+    timeline = f"\nOn-screen timeline (vision-model transcription; verify):\n{visual_notes}\n" if visual_notes else ""
     return f"""
-Tutorial title: {title}
-You are writing section {chapter_no} of {total}. Video segment transcript and
-frames follow. Write the definitive tutorial treatment of this material,
-grounded and cited, per your instructions.
+{intro}
 
-{figure_block}
-
-Timestamped transcript for this segment (your seed, not a script to copy):
+Figures attached (use these exact file names):
+{figures}
+{timeline}
+{body_label}:
 --------------------------------------------------
-{chunk.transcript}
+{text}
 --------------------------------------------------
 """.strip()
 
 
 # ---------------------------------------------------------------------------
-# Pass 2: integrate fragments into one coherent, complete document
+# Pass 2: content inventory — the checklist of what must not be lost
 # ---------------------------------------------------------------------------
 
-INTEGRATE_SYSTEM = r"""
-You are the author assembling ordered section drafts into one polished,
-self-contained tutorial document. You are given an exact preamble to use verbatim.
+INVENTORY_SYSTEM = r"""
+You extract the complete inventory of a draft section of a tutorial: every
+distinct piece of content that the final tutorial must contain. This list is a
+checklist; anything not on it may be lost, so be exhaustive.
 
-Requirements:
-- Produce a COMPLETE tutorial, not a summary. Preserve all substantive content
-  and every derivation step from the drafts; expand or bridge where continuity
-  needs it. The finished document should teach the topic from motivation to
-  conclusion without requiring the video.
-- STRUCTURE FOR FLOW, not for fidelity to the video's order. Arrange the material
-  in the clearest pedagogical progression: introduce each concept before anything
-  that depends on it, group related methods together, and build from foundations
-  to the main result. Reorder, split, or merge the draft sections as needed — the
-  order the drafts arrive in (the video's timeline) is NOT binding.
-- Keep the main line clean. Move tangential, optional, or specialized material
-  (branches a reader on the main path can skip) into clearly-labeled sections
-  placed off the critical path — e.g. near the end — and say explicitly that they
-  are optional and why. Never let a side-topic interrupt the build-up to the main
-  result.
-- Make the structure self-explanatory: give the introduction a real roadmap that
-  previews the order and names any optional branches; open each section with a
-  one- or two-sentence orientation; and use explicit transitions that state how
-  each section follows from the previous one. The reader should always know where
-  they are and why.
-- Aim for a COMPLETE treatment of the TOPIC, not just of the video. If a standard,
-  important component of the subject is missing entirely, add a grounded section or
-  subsection for it, cited like the rest.
-- Enforce ONE consistent notation throughout; reconcile any clashes between
-  sections silently (rewrite, do not annotate the reconciliation).
-- Remove accidental repetition and redundant re-introductions across sections,
-  but keep the explanations themselves.
-- Keep every \cite{...} exactly as written (a later pass resolves them). Keep all
-  \begin{figure} blocks with their \includegraphics/\caption/\label and paths.
-  Do NOT drop figures to "tighten" the document — a figure-rich tutorial is a
-  goal; only remove a figure if it is a true duplicate of another.
-- Preserve the intuition-first character: keep the problem -> intuition/analogy
-  -> math progression and the beginner-facing explanations from the drafts. Do
-  not compress teaching prose into a terse run of equations.
-- Do NOT fabricate claims, numbers, or citations. This is a correctness rule, not
-  a scope limit: grounded, standard expansion of the topic is wanted — staying
-  narrowly within the video is not. Everything additive must be correct and, where
-  it is a nontrivial claim, cited.
-
-Document structure:
-  1. The provided preamble, verbatim.
-  2. \begin{document}
-  3. \maketitle and \tableofcontents
-  4. \section{Introduction}: motivation, what the reader will learn, prerequisites,
-     and a roadmap that previews the section order and flags optional branches —
-     written as normal prose.
-  5. All tutorial sections, arranged in the clearest pedagogical order (not
-     necessarily the drafts' order), integrated into a coherent whole with optional
-     branches clearly marked and kept off the main line.
-  6. \section{Summary} (or Conclusion): the throughline and key takeaways.
-  7. \end{document}
-
-Do NOT write a References/Bibliography section — a later pass appends it from the
-\cite keys. Just end with \end{document}. Return ONE complete LaTeX document as
-raw LaTeX only — no markdown fences, no commentary.
+Make one item per concept, definition, problem setup, equation, derivation,
+result, algorithm, worked example, figure, comparison, caveat, and key insight.
+A typical draft yields 15-60 items. For each item give:
+- kind: concept | definition | problem | equation | derivation | result |
+  algorithm | example | figure | comparison | caveat | insight
+- title: a short name
+- detail: what exactly must be preserved — the key equations in LaTeX, numbers,
+  the steps of a derivation, the specifics of an example
+- figures: file names of figures (\includegraphics) this item uses, if any
+- depends_on: titles of other items in this list it builds on, if any
 """.strip()
 
+INVENTORY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string", "description": "2-4 sentences: what this draft covers."},
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string"},
+                    "title": {"type": "string"},
+                    "detail": {"type": "string"},
+                    "figures": {"type": "array", "items": {"type": "string"}},
+                    "depends_on": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["kind", "title", "detail"],
+            },
+        },
+    },
+    "required": ["summary", "items"],
+}
 
-def integrate_user(title: str, description: str, preamble: str, fragments: str) -> str:
-    desc = (description or "").strip()
-    desc_block = f"\nSource description (context only):\n{desc[:2000]}\n" if desc else ""
+
+def inventory_user(source_title: str, position: str, draft: str) -> str:
     return f"""
-Title: {title}
-{desc_block}
-Use EXACTLY this preamble (verbatim) as the top of the document:
---------------------------------------------------
-{preamble}
---------------------------------------------------
+Draft from "{source_title}", {position}. List every item of content in it.
 
-Ordered section drafts to integrate (each already valid LaTeX body with \\cite keys):
 ==================================================
-{fragments}
+{draft}
 ==================================================
 """.strip()
 
 
 # ---------------------------------------------------------------------------
-# Pass 3: build a grounded bibliography from the \cite keys in the document
+# Pass 3: outline — one pedagogical sequence covering every item
+# ---------------------------------------------------------------------------
+
+
+def outline_system(ground: bool, guide: str | None = None) -> str:
+    research = (
+        "You have research tools: use them to settle the correct order of ideas, "
+        "the standard notation, and any prerequisite or bridging material the flow "
+        "needs."
+        if ground
+        else "Use only standard, well-established material for prerequisites and bridges."
+    )
+    return f"""
+You are the lead author designing the structure of a tutorial built from several
+seeds (videos and/or documents). You get the inventory of every item of content
+found in the seeds (with ids), and the figures available. Design the outline of
+ONE tutorial that teaches the whole topic to the standard below.
+
+{TUTORIAL_STANDARD}
+
+{SEED_RULES}
+
+OUTLINE RULES
+- First decide the STORYLINE: the single throughline that carries the reader
+  from the motivating problem to the final results. Every section must be a step
+  in it; a section that is not a step in the story is either optional or wrong.
+- Every inventory item id MUST be assigned to at least one section. Nothing may
+  be dropped. Items that repeat across seeds go together (one place, merged).
+- Order for learning, never by source. The seeds mix setup, solutions, and
+  asides in whatever order they happened to use; you choose the most
+  educational order: each concept before anything that depends on it; easier
+  before harder; concrete before abstract; the problem, then the natural first
+  attempt and why it falls short, then the better solutions. Interleave material
+  from different seeds wherever that serves the story.
+- No out-of-the-blue sections: for every section, state the question the reader
+  has at that point and why it arises from the previous section ("motivation").
+  If the flow needs a prerequisite or bridge that no seed covers, add it under
+  "new_material" of the section where it is first needed.
+- For each section give a "plan": the ordered steps of the exposition (problem
+  setup, intuition, each derivation step, examples, conclusions) — detailed
+  enough that a writer can follow it without guessing. Size the plan to the
+  difficulty of the ideas, not to how much the seeds said: where the seeds are
+  thin or rushed on an important idea, the plan must spell out every step a
+  newcomer needs, because the writer relies on it. Split heavy topics into
+  several sections rather than compressing them.
+- The first section is the introduction (role "introduction": the motivating
+  problem, what the reader will learn, assumed background, and a roadmap); the
+  last is the summary (role "summary": the throughline and key takeaways; it
+  introduces nothing new). Tangential material goes in sections with role
+  "optional", placed off the main line, and the plan says why it is optional.
+- Assign each figure to the section where it teaches best. Every figure that an
+  item uses must be assigned.
+- Fix one notation for the whole tutorial (the "notation" list) and reconcile
+  conflicting notation between seeds.
+- Only if the author's brief explicitly asks to leave some material out, list
+  those item ids under "excluded_items" with the reason; otherwise leave it empty.
+- {research}{brief_block(guide)}
+""".strip()
+
+
+OUTLINE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "storyline": {"type": "string", "description": "The throughline from problem to results, 3-6 sentences."},
+        "reader_background": {"type": "string", "description": "What the reader is assumed to know."},
+        "notation": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"symbol": {"type": "string"}, "meaning": {"type": "string"}},
+                "required": ["symbol", "meaning"],
+            },
+        },
+        "sections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "role": {"type": "string", "enum": ["introduction", "core", "optional", "summary"]},
+                    "question": {"type": "string", "description": "The question this section answers."},
+                    "motivation": {"type": "string", "description": "Why the reader needs this now."},
+                    "plan": {"type": "array", "items": {"type": "string"}},
+                    "items": {"type": "array", "items": {"type": "string"}},
+                    "new_material": {"type": "array", "items": {"type": "string"}},
+                    "figures": {"type": "array", "items": {"type": "string"}},
+                    "leads_to": {"type": "string", "description": "The open question passed on."},
+                },
+                "required": ["title", "role", "question", "motivation", "plan", "items", "figures", "leads_to"],
+            },
+        },
+        "excluded_items": {
+            "type": "array",
+            "description": "Only items the author's brief explicitly asks to leave out.",
+            "items": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}, "reason": {"type": "string"}},
+                "required": ["id", "reason"],
+            },
+        },
+    },
+    "required": ["title", "storyline", "reader_background", "notation", "sections"],
+}
+
+
+def outline_user(sources: str, inventory: str, figures: str, title_hint: str | None) -> str:
+    title_line = f"Use this title: {title_hint}" if title_hint else "Propose a precise title."
+    return f"""
+{title_line}
+
+Seeds:
+{sources}
+
+Available figures (name | value 0-10 | description):
+{figures or "(none)"}
+
+Content inventory (id | kind | title | detail):
+{inventory}
+""".strip()
+
+
+def outline_retry_user(previous: str, missing: str, unknown: str) -> str:
+    return f"""
+Your outline did not satisfy the rules. Return the COMPLETE corrected outline.
+{f"These item ids were not assigned to any section — place each where it belongs in the flow: {missing}" if missing else ""}
+{f"These ids/figure names do not exist; remove or correct them: {unknown}" if unknown else ""}
+
+Your previous outline:
+{previous}
+""".strip()
+
+
+# ---------------------------------------------------------------------------
+# Pass 4: write one section from the outline
+# ---------------------------------------------------------------------------
+
+
+def section_system(ground: bool, guide: str | None = None) -> str:
+    return f"""
+You are the author writing ONE section of a tutorial, following the outline
+designed for the whole tutorial. You get the full outline (so you know what the
+reader has already learned and what comes later), this section's specification,
+the content items it must cover, the fact-checked draft material those items
+come from, its figures, and the end of the previous section.
+
+{TUTORIAL_STANDARD}
+
+{SEED_RULES}
+
+{research_rules(ground)}
+
+WRITING THIS SECTION
+- Cover EVERY assigned item completely: all of its equations, derivation steps,
+  numbers, and examples. The draft material is your source; you may improve its
+  explanations, but drop nothing.
+- Explain each idea at the depth its difficulty demands. Where the draft
+  material is thin or rushed (because a source was), write the missing setup,
+  intuition, derivation steps, and examples yourself — you are responsible for
+  the reader understanding it, whatever the sources did.
+- Follow the plan's order. Cover the listed new_material where it is needed.
+- Open by connecting to the end of the previous section and stating this
+  section's question; close by stating what was established and the open
+  question in "leads_to". Never re-teach earlier sections (refer back to them);
+  do not anticipate later sections beyond a one-line preview.
+- Use the outline's notation exactly. Reuse the citation keys already in use for
+  the same works.
+- Include every assigned figure, with a caption, discussed in the text.
+- The introduction gives the motivating problem, what the reader will learn, the
+  assumed background, and a roadmap of the sections. The summary introduces
+  nothing new.
+- Never mention item ids, drafts, seeds, videos, or this process in the text.
+- Keep the storyline in view: make clear how this section moves it forward.
+
+{LATEX_RULES}
+
+OUTPUT
+Exactly one section: start with \\section{{<the section title>}} and end with
+the line {SECTION_END}{brief_block(guide)}
+""".strip()
+
+
+def section_user(
+    *,
+    title: str,
+    overview: str,
+    notation: str,
+    spec: str,
+    items: str,
+    material: str,
+    figure_lines: str,
+    previous_tail: str,
+    cite_keys: str,
+) -> str:
+    return f"""
+Tutorial: {title}
+
+Full outline (you are writing the section marked >>>):
+{overview}
+
+Notation (use exactly):
+{notation or "(none fixed)"}
+
+This section:
+{spec}
+
+Items this section must cover completely:
+{items or "(none — see the plan)"}
+
+Figures for this section (attached as images; use these exact file names):
+{figure_lines or "(none)"}
+
+Citation keys already used in earlier sections (reuse for the same works):
+{cite_keys or "(none yet)"}
+
+End of the previous section (continue from here):
+--------------------------------------------------
+{previous_tail or "(this is the first section)"}
+--------------------------------------------------
+
+Fact-checked draft material for these items:
+==================================================
+{material}
+==================================================
+""".strip()
+
+
+# ---------------------------------------------------------------------------
+# Pass 5: review a written section, then revise it
+# ---------------------------------------------------------------------------
+
+
+def review_system(ground: bool, guide: str | None = None) -> str:
+    research = (
+        "Use the research tools to check any claim, formula, or attribution you doubt."
+        if ground
+        else "Flag any claim you believe is incorrect."
+    )
+    return f"""
+You are a demanding reviewer reading one section of a tutorial as its intended
+reader would: technically mature, but new to this topic. You get the section,
+its specification from the outline, the items it must cover, and the outline of
+the whole tutorial.
+
+{TUTORIAL_STANDARD}
+
+Check, and report precisely:
+1. Coverage: every assigned item is present IN FULL (its equations, steps,
+   numbers, examples). List each missing or partial item id and what is missing.
+2. Rigor: logical jumps, skipped derivation steps, symbols or terms used before
+   being defined, methods introduced without motivation, unjustified claims,
+   and factual errors. {research}
+3. Flow: does it open from the previous section and state its question, follow a
+   sensible order, and close with what was learned and what comes next? Does it
+   re-teach earlier material or depend on something not yet covered?
+4. Depth: any idea explained more briefly or superficially than its difficulty
+   demands — e.g. a short paragraph where the reader needs a problem setup, a
+   step-by-step derivation, or a worked example. Say exactly what to add. Judge
+   by what the reader needs, not by what the sources happened to cover.
+5. Figures: every assigned figure included, captioned, and discussed.
+Read it as the intended reader: could they follow every paragraph with only
+what came before, without other material?
+For every issue say where it is and exactly how to fix it. Approve only if
+nothing is missing and no substantive issue remains.{brief_block(guide)}
+""".strip()
+
+
+REVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "approved": {"type": "boolean"},
+        "missing_items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}, "what_is_missing": {"type": "string"}},
+                "required": ["id", "what_is_missing"],
+            },
+        },
+        "issues": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string"},
+                    "problem": {"type": "string"},
+                    "fix": {"type": "string"},
+                },
+                "required": ["location", "problem", "fix"],
+            },
+        },
+    },
+    "required": ["approved", "missing_items", "issues"],
+}
+
+
+def review_user(*, overview: str, spec: str, items: str, section: str, checks: str) -> str:
+    return f"""
+Outline of the whole tutorial (the reviewed section is marked >>>):
+{overview}
+
+Section specification:
+{spec}
+
+Items it must cover completely:
+{items or "(none — see the plan)"}
+{f"{chr(10)}Automatic checks already found:{chr(10)}{checks}{chr(10)}" if checks else ""}
+Section to review:
+==================================================
+{section}
+==================================================
+""".strip()
+
+
+def revise_system(ground: bool, guide: str | None = None) -> str:
+    return f"""
+You are revising one section of a tutorial to resolve every point of a review.
+Fix each listed problem and add each missing item in full, using the draft
+material. Keep everything else that is correct — do not shorten or drop content.
+
+{TUTORIAL_STANDARD}
+
+{research_rules(ground)}
+
+{LATEX_RULES}
+
+OUTPUT
+The complete revised section: start with \\section{{<the section title>}} and end
+with the line {SECTION_END}{brief_block(guide)}
+""".strip()
+
+
+def revise_user(*, section_request: str, section: str, review: str) -> str:
+    return f"""
+Review to resolve:
+{review}
+
+Current section:
+==================================================
+{section}
+==================================================
+
+The original writing brief for this section (outline, items, figures, draft material):
+{section_request}
+""".strip()
+
+
+# ---------------------------------------------------------------------------
+# Bibliography: resolve the \cite keys into a grounded thebibliography
 # ---------------------------------------------------------------------------
 
 BIBLIOGRAPHY_SYSTEM = r"""
 You are compiling the bibliography for a finished tutorial. You are given the
-document and the exact set of \cite keys it uses. Produce a real, correct
-reference list, grounded in the sources — not guessed.
+exact set of \cite keys it uses and the text around each citation. Produce a
+real, correct reference list, grounded in the sources — not guessed.
 
 Rules:
 - Use the research tools (arxiv_search / web_search / fetch_url) to find the
@@ -237,47 +738,85 @@ Rules:
 """.strip()
 
 
-def bibliography_user(title: str, keys: list[str], document: str) -> str:
-    key_list = "\n".join(f"  - {k}" for k in keys)
+def bibliography_user(title: str, contexts: dict[str, list[str]]) -> str:
+    """``contexts`` maps each cite key to snippets of the text that cites it."""
+    key_list = "\n".join(f"  - {k}" for k in contexts)
+    usage = "\n\n".join(
+        f"[{key}]\n" + "\n".join(f"  ... {s} ..." for s in snippets)
+        for key, snippets in contexts.items()
+    )
     return f"""
 Tutorial title: {title}
 
 Produce a \\bibitem for EACH of these \\cite keys (exactly these, no more, no fewer):
 {key_list}
 
-For context, here is the document that cites them (find where each key is used to
+For context, here is the text around every place each key is cited (use it to
 infer the intended work):
 ==================================================
-{document[:20000]}
+{usage}
 ==================================================
 """.strip()
 
 
 # ---------------------------------------------------------------------------
-# Pass 4: auto-repair a document that failed to compile
+# LaTeX repair for a document that failed to compile
 # ---------------------------------------------------------------------------
 
-FIX_SYSTEM = r"""
-You are a LaTeX build fixer. You are given a full LaTeX document and the tail of
-a failing compiler log. Fix ONLY what prevents compilation: undefined macros,
-unbalanced environments/braces, illegal characters, bad math syntax, duplicate
-labels, missing packages that must be added to the preamble.
+_FIX_RULES = r"""
+You are a LaTeX build fixer. You are given a LaTeX document, the errors from a
+failing compile (with the offending source lines), and the tail of the compiler
+log. Fix ONLY what prevents compilation: undefined macros, unbalanced
+environments/braces, illegal characters, bad math syntax, duplicate labels,
+missing packages that must be added to the preamble. Fix every error you can see,
+not just the first.
 
 Do not change the substance, wording, equations, figures, citations, or structure
-beyond what is strictly required to compile. Keep every \cite and \bibitem intact.
-Return the ENTIRE corrected document as raw LaTeX only — no markdown fences, no
-commentary.
+beyond what is strictly required to compile. Never delete a section, paragraph,
+equation, figure, or citation to make an error go away — repair it instead.
 """.strip()
 
+FIX_SYSTEM = (
+    _FIX_RULES
+    + r"""
 
-def fix_user(document: str, log_tail: str) -> str:
+Reply with targeted edits only, as one or more blocks in exactly this format:
+<<<<<<< SEARCH
+exact lines copied from the document
+=======
+replacement lines
+>>>>>>> REPLACE
+Each SEARCH text must match the document character for character and occur
+exactly once; include enough surrounding lines to make it unique. Output nothing
+but the edit blocks — no markdown fences, no commentary.
+"""
+)
+
+FIX_FULL_SYSTEM = (
+    _FIX_RULES
+    + """
+
+Return the ENTIRE corrected document as raw LaTeX only — no markdown fences, no
+commentary.
+"""
+)
+
+
+def fix_user(document: str, errors: str, log_tail: str, rejected: str = "") -> str:
+    note = f"\nYour previous fix was rejected: {rejected}\n" if rejected else ""
     return f"""
+{note}
+Compile errors (with source context):
+--------------------------------------------------
+{errors or "(no error lines could be extracted; see the log tail)"}
+--------------------------------------------------
+
 Compiler log (tail):
 --------------------------------------------------
 {log_tail}
 --------------------------------------------------
 
-Full LaTeX document to fix:
+LaTeX document:
 ==================================================
 {document}
 ==================================================

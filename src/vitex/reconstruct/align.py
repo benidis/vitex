@@ -22,24 +22,23 @@ def assign_frames(chunks: list[Chunk], frames: list[Frame], max_images_per_chunk
     """Populate ``chunk.frames`` in place by matching timestamps to windows.
 
     A frame is placed in the chunk whose ``[start, end]`` interval contains its
-    timestamp. Frames before the first chunk go to the first chunk; frames after
-    the last go to the last, so nothing is silently dropped.
+    timestamp. A frame outside every window (before the first, after the last,
+    or in a pause between two chunks) goes to the nearest chunk, preferring the
+    later one on a tie — a slide that appears in a pause usually introduces the
+    narration that follows. Nothing is silently dropped.
     """
     if not chunks:
         return
     for c in chunks:
         c.frames = []
 
+    def distance(c: Chunk, t: float) -> float:
+        return max(c.start - t, t - c.end, 0.0)
+
     for f in frames:
-        placed = False
-        for c in chunks:
-            if c.start <= f.timestamp <= c.end:
-                c.frames.append(f)
-                placed = True
-                break
-        if not placed:
-            target = chunks[0] if f.timestamp < chunks[0].start else chunks[-1]
-            target.frames.append(f)
+        # min() keeps the first minimum, so iterate latest-first to break ties late.
+        target = min(reversed(chunks), key=lambda c: distance(c, f.timestamp))
+        target.frames.append(f)
 
     for c in chunks:
         c.frames.sort(key=lambda fr: fr.timestamp)

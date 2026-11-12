@@ -1,6 +1,6 @@
 from vitex.config import Config
-from vitex.llm.prompts import chapter_user
-from vitex.models import Chunk, Segment, _fmt_timestamp
+from vitex.llm.prompts import draft_system, draft_user
+from vitex.models import _fmt_timestamp
 from vitex.output.latex import _tex_escape, build_preamble
 from vitex.reconstruct.chapters import strip_fences
 from vitex.utils import safe_stem
@@ -31,10 +31,13 @@ def test_tex_escape_and_preamble_title():
     assert r"\newtheorem{definition}" in pre and r"\graphicspath{{figures/}}" in pre
 
 
-def test_chapter_user_lists_frames_or_none():
-    seg = Segment(0, 5, "hello")
-    empty = Chunk(index=0, start=0, end=5, segments=[seg], frames=[])
-    assert "No frames are available" in chapter_user(empty, "T", 1, 1)
+def test_draft_prompts_carry_the_tutorial_standard_and_seed_rules():
+    system = draft_system(ground=True)
+    assert "not a summary" in system and "SEEDS" in system and "arxiv_search" in system
+    assert "arxiv_search" not in draft_system(ground=False)
+    user = draft_user(kind="document", source_title="Notes", position="part 1 of 2",
+                      text="BODY", figure_lines="", visual_notes="")
+    assert "Keep ALL of its content" in user and "BODY" in user and "(none)" in user
 
 
 def test_config_validate_rejects_bad_provider():
@@ -45,3 +48,59 @@ def test_config_validate_rejects_bad_provider():
         assert "provider" in str(e)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_authors_brief_reaches_every_writing_prompt():
+    from vitex.llm.prompts import outline_system, review_system, revise_system, section_system
+
+    brief = "Focus on policy-gradient derivations."
+    for build in (draft_system, outline_system, section_system, review_system, revise_system):
+        assert brief in build(True, brief)
+        assert "AUTHOR'S BRIEF" not in build(True, None)
+    assert "Depth follows difficulty" in section_system(True)
+
+
+def test_cli_title_name_and_guide_file(tmp_path, monkeypatch):
+    from vitex.cli import _build_parser, _config_from_args
+
+    monkeypatch.setattr("vitex.config.load_dotenv", lambda: None)  # ignore the real .env
+    monkeypatch.setenv("VITEX_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+
+    brief = tmp_path / "brief.txt"
+    brief.write_text("Modern RL only.")
+    doc = tmp_path / "old.tex"
+    doc.write_text("x")
+    args = _build_parser().parse_args(
+        ["run", "--doc", str(doc), "--title", "Modern RL: A Tutorial", "--name", "modern_rl",
+         "--guide-file", str(brief)]
+    )
+    cfg = _config_from_args(args)
+    assert cfg.sources == [] and cfg.docs == [doc]
+    assert (cfg.title, cfg.name, cfg.guide) == ("Modern RL: A Tutorial", "modern_rl", "Modern RL only.")
+    cfg.validate()  # documents only is a valid run
+
+
+def test_aws_profile_is_required_and_never_inferred(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr("vitex.config.load_dotenv", lambda: None)  # ignore the real .env
+    monkeypatch.setenv("AWS_PROFILE", "aws-devtools-sci")  # must NOT be picked up
+    monkeypatch.delenv("VITEX_AWS_PROFILE", raising=False)
+    monkeypatch.setenv("VITEX_PROVIDER", "bedrock")
+    cfg = Config.from_env()
+    cfg.sources = ["video.mp4"]
+    assert cfg.aws_profile is None
+    with pytest.raises(ValueError, match="VITEX_AWS_PROFILE is not set"):
+        cfg.validate()
+
+    cfg.aws_profile = "no-such-profile-xyz"
+    with pytest.raises(ValueError, match="not a profile"):
+        cfg.validate()
+
+    # The Anthropic API needs no AWS profile (with the local whisper transcriber).
+    api = Config(provider="anthropic", anthropic_api_key="k", sources=["video.mp4"])
+    api.validate()
+    api.transcriber, api.transcribe_bucket = "aws", "bucket"
+    with pytest.raises(ValueError, match="VITEX_AWS_PROFILE"):
+        api.validate()

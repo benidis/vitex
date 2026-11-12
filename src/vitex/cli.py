@@ -19,8 +19,41 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest="command", required=True)
 
-    run = sub.add_parser("run", help="Run the full pipeline on a video URL or file.")
-    run.add_argument("source", help="YouTube (or other yt-dlp) URL, or a local video file.")
+    run = sub.add_parser(
+        "run",
+        help="Build one tutorial from any number of videos and documents (all used as seeds).",
+    )
+    run.add_argument(
+        "sources",
+        nargs="*",
+        help="Video sources: YouTube (or other yt-dlp) URLs and/or local video files.",
+    )
+    run.add_argument(
+        "--doc",
+        dest="docs",
+        action="append",
+        type=Path,
+        default=[],
+        help="A document to use as a seed (.tex/.md/.txt/.pdf), e.g. an existing tutorial "
+        "to fact-check and improve. Repeatable.",
+    )
+    run.add_argument(
+        "--title",
+        help="Title printed in the document (default: proposed by the outline pass). "
+        "Also names the output dir/files unless --name is given.",
+    )
+    run.add_argument(
+        "--name",
+        help="Output directory and file name: <outdir>/<name>/<name>.{tex,pdf} "
+        "(default: the title, made filesystem-safe).",
+    )
+    guide = run.add_mutually_exclusive_group()
+    guide.add_argument(
+        "--guide",
+        help="Author's brief steering the whole tutorial, e.g. \"cover all modern RL methods; "
+        "focus on policy-gradient derivations\". Applied to every writing pass.",
+    )
+    guide.add_argument("--guide-file", type=Path, help="Read the author's brief from a file.")
 
     run.add_argument(
         "--outdir", type=Path,
@@ -33,12 +66,11 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--provider", choices=["bedrock", "anthropic"], help="Claude backend.")
     run.add_argument("--model", help="Model id / Bedrock inference-profile id.")
     run.add_argument("--fix-model", help="Model for the LaTeX repair pass (default: --model).")
-    run.add_argument("--aws-region", help="AWS region for Bedrock / Transcribe.")
     run.add_argument(
-        "--aws-profile",
-        help="Named ~/.aws profile for the Bedrock client "
-        "(default: ambient AWS credentials — AWS_PROFILE/env/instance role).",
+        "--triage-model",
+        help="Vision model that rates every frame (default: --model; a Haiku profile is cheaper).",
     )
+    run.add_argument("--aws-region", help="AWS region for Bedrock / Transcribe.")
 
     run.add_argument("--transcriber", choices=["whisper", "aws"], help="Speech-to-text backend.")
     run.add_argument("--whisper-model", help="faster-whisper size (tiny..large-v3).")
@@ -46,9 +78,19 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--frame-interval", type=float, help="Seconds between sampled frames (pre-dedup)."
     )
-    run.add_argument("--max-images", type=int, help="Max frames sent per chapter.")
+    run.add_argument("--max-images", type=int, help="Max frames attached per video seed unit.")
     run.add_argument(
-        "--chunk-minutes", type=float, help="Transcript minutes per generated chapter."
+        "--min-frame-value",
+        type=int,
+        help="Minimum 0-10 triage score for a frame to be attached (default: 5).",
+    )
+    run.add_argument(
+        "--chunk-minutes", type=float, help="Transcript minutes per video seed unit."
+    )
+    run.add_argument(
+        "--review-rounds",
+        type=int,
+        help="Review+revision rounds per section (default: 2; 0 disables review).",
     )
 
     run.add_argument(
@@ -57,6 +99,17 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Ground the tutorial in real articles/papers via web+arXiv research "
         "and cite them (default: enabled). Use --no-ground for a fully offline run.",
+    )
+    run.add_argument(
+        "--research-iterations",
+        type=int,
+        help="Max rounds of research tool calls per generation pass (default: 16).",
+    )
+    run.add_argument(
+        "--prompt-cache",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Use prompt caching for repeated system/image context (default: enabled).",
     )
     run.add_argument("--no-pdf", action="store_true", help="Emit .tex only; skip PDF compilation.")
     run.add_argument(
@@ -69,20 +122,28 @@ def _build_parser() -> argparse.ArgumentParser:
 def _config_from_args(args: argparse.Namespace) -> Config:
     """Start from env/.env, then apply any explicit CLI overrides."""
     cfg = Config.from_env()
-    cfg.source = args.source
+    cfg.sources = list(args.sources)
+    cfg.docs = list(args.docs)
     overrides = {
+        "title": args.title,
+        "name": args.name,
+        "guide": args.guide_file.read_text(encoding="utf-8") if args.guide_file else args.guide,
+        "triage_model": args.triage_model,
+        "min_frame_value": args.min_frame_value,
+        "review_rounds": args.review_rounds,
         "outdir": args.outdir,
         "workdir": args.workdir,
         "provider": args.provider,
         "model": args.model,
         "fix_model": args.fix_model,
         "aws_region": args.aws_region,
-        "aws_profile": args.aws_profile,
         "transcriber": args.transcriber,
         "whisper_model": args.whisper_model,
         "frame_interval": args.frame_interval,
         "max_images_per_chunk": args.max_images,
         "chunk_minutes": args.chunk_minutes,
+        "research_max_iterations": args.research_iterations,
+        "prompt_caching": args.prompt_cache,
     }
     for key, val in overrides.items():
         if val is not None:
@@ -104,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = _config_from_args(args)
         result = Pipeline(cfg).run()
-    except VitexError as exc:
+    except (VitexError, ValueError) as exc:
         log.error("%s", exc)
         return 1
     except KeyboardInterrupt:

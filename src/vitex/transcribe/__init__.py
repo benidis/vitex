@@ -15,6 +15,6 @@ def build_transcriber(cfg: Config) -> Transcriber:
     if cfg.transcriber == "whisper":
         return WhisperTranscriber(model_size=cfg.whisper_model)
     if cfg.transcriber == "aws":
-        assert cfg.transcribe_bucket  # guaranteed by Config.validate()
-        return AWSTranscriber(bucket=cfg.transcribe_bucket, region=cfg.aws_region)
+        assert cfg.transcribe_bucket and cfg.aws_profile  # guaranteed by Config.validate()
+        return AWSTranscriber(bucket=cfg.transcribe_bucket, region=cfg.aws_region, profile=cfg.aws_profile)
     raise ValueError(f"Unknown transcriber: {cfg.transcriber!r}")

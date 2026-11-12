@@ -13,29 +13,80 @@ API keys and no compiled dependencies to install:
 
 Network failures are non-fatal: a tool returns an explanatory string and the
 model continues. arXiv is the reliable backbone; web search is best-effort.
+
+``fetch_url`` takes a URL chosen by the model, which may have been steered by
+text on a page it read. So every request (and every redirect hop) is vetted:
+only http(s), and only hosts that resolve to public addresses — never local
+files, loopback, private networks, or the cloud instance-metadata endpoint.
 """
 
 from __future__ import annotations
 
 import html
+import ipaddress
 import json
 import logging
 import re
+import socket
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from typing import Callable
 
 log = logging.getLogger("vitex")
 
 _UA = "Mozilla/5.0 (compatible; vitex/0.1; +https://example.invalid/vitex)"
 _TIMEOUT = 20
+_MAX_BYTES = 2_000_000  # cap on any single response body
+
+
+class UnsafeURLError(ValueError):
+    """The URL's scheme or destination address is not allowed."""
+
+
+def check_public_url(url: str) -> None:
+    """Raise :class:`UnsafeURLError` unless ``url`` is http(s) to a public host.
+
+    Every address the host resolves to must be globally routable, which rules
+    out loopback, RFC 1918 / ULA private ranges, link-local (including the
+    169.254.169.254 metadata service), CGNAT, and reserved ranges.
+    """
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        raise UnsafeURLError(f"only http(s) URLs are allowed, got {parts.scheme or 'none'!r}")
+    host = parts.hostname
+    if not host:
+        raise UnsafeURLError("URL has no host")
+    try:
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except (OSError, ValueError) as exc:
+        raise UnsafeURLError(f"cannot resolve {host!r}: {exc}") from exc
+    for info in infos:
+        ip = ipaddress.ip_address(str(info[4][0]).split("%", 1)[0])
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        if not ip.is_global:
+            raise UnsafeURLError(f"{host!r} resolves to non-public address {ip}")
+
+
+class _VettedRedirects(urllib.request.HTTPRedirectHandler):
+    """Re-apply :func:`check_public_url` to every redirect target."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        check_public_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_VettedRedirects)
 
 
 def _get(url: str, *, data: bytes | None = None) -> str:
+    check_public_url(url)
     req = urllib.request.Request(url, data=data, headers={"User-Agent": _UA})
-    with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:  # noqa: S310 - fixed hosts
+    with _OPENER.open(req, timeout=_TIMEOUT) as resp:  # noqa: S310 - vetted above
         charset = resp.headers.get_content_charset() or "utf-8"
-        return resp.read().decode(charset, errors="replace")
+        return resp.read(_MAX_BYTES).decode(charset, errors="replace")
 
 
 def _strip_html(fragment: str) -> str:
@@ -61,7 +112,7 @@ def arxiv_search(query: str, max_results: int = 5) -> str:
         }
     )
     try:
-        raw = _get(f"http://export.arxiv.org/api/query?{q}")
+        raw = _get(f"https://export.arxiv.org/api/query?{q}")
         root = ET.fromstring(raw)
     except Exception as exc:  # noqa: BLE001 - surfaced to the model, non-fatal
         return f"arxiv_search failed: {exc}"
@@ -159,7 +210,7 @@ def fetch_url(url: str, max_chars: int = 6000) -> str:
     raw = re.sub(r"(?is)<(script|style|head|nav|footer)[^>]*>.*?</\1>", " ", raw)
     text = _strip_html(raw)
     text = re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]+", " ", text))
-    return text[:max_chars]
+    return text[: max(1, min(max_chars, 20000))]
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +263,7 @@ TOOL_SPECS = [
     },
 ]
 
-_DISPATCH = {
+_DISPATCH: dict[str, Callable[..., str]] = {
     "arxiv_search": arxiv_search,
     "web_search": web_search,
     "fetch_url": fetch_url,

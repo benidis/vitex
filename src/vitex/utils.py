@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -70,6 +71,38 @@ def safe_stem(text: str, fallback: str = "tutorial") -> str:
     text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"\s+", "_", text.strip())
     return text[:100] or fallback
+
+
+def fingerprint(*parts: Any) -> str:
+    """Stable hash of everything that determines a cached artifact's content."""
+    blob = json.dumps(parts, sort_keys=True, default=str, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _key_path(path: Path) -> Path:
+    return path.with_name(path.name + ".key")
+
+
+def read_cached(path: Path, key: str, force: bool = False) -> str | None:
+    """Return the cached text at ``path`` if it was produced from ``key``.
+
+    Each artifact has a ``<name>.key`` sidecar holding the fingerprint of the
+    inputs it was built from, so a change in config, prompts, or upstream
+    content invalidates exactly the stages that depend on it.
+    """
+    if force or not path.exists():
+        return None
+    kp = _key_path(path)
+    if not kp.exists() or kp.read_text(encoding="utf-8").strip() != key:
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def write_cached(path: Path, key: str, text: str) -> None:
+    """Write ``text`` to ``path`` and record the input fingerprint beside it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    _key_path(path).write_text(key, encoding="utf-8")
 
 
 def write_json(path: Path, obj: Any) -> None:

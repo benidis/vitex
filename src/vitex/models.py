@@ -96,15 +96,69 @@ class Chunk:
 
 
 @dataclass
-class ChapterDraft:
-    """LaTeX body fragment produced for a single :class:`Chunk`."""
+class FrameNote:
+    """A vision model's assessment of one distinct frame (see media.triage).
 
-    index: int
-    latex: str
+    ``value`` (0-10) is how much a reader would learn from seeing this exact
+    image in the tutorial. ``superseded_by`` names a later frame showing the same
+    content more completely (e.g. the finished version of a slide being built
+    up). ``text`` is the legible on-screen text/equations, so the content of a
+    frame reaches the writer even when the image itself is not attached.
+    """
+
+    name: str  # figure file name
+    kind: str
+    legible: bool
+    complete: bool
+    value: int
+    superseded_by: str | None
+    description: str
+    text: str
+    reason: str
 
     def to_dict(self) -> dict:
-        return {"index": self.index, "latex": self.latex}
+        return dict(self.__dict__)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "ChapterDraft":
-        return cls(index=int(d["index"]), latex=str(d["latex"]))
+    def from_dict(cls, d: dict) -> "FrameNote":
+        return cls(
+            name=str(d["name"]),
+            kind=str(d.get("kind", "other")),
+            legible=bool(d.get("legible", True)),
+            complete=bool(d.get("complete", True)),
+            value=int(d.get("value", 0)),
+            superseded_by=d.get("superseded_by") or None,
+            description=str(d.get("description", "")),
+            text=str(d.get("text", "")),
+            reason=str(d.get("reason", "")),
+        )
+
+
+@dataclass
+class Figure:
+    """An image the tutorial may include: a video frame or a document figure.
+
+    ``name`` is the globally unique file name the model writes in
+    ``\\includegraphics`` (and the name it is staged under in ``figures/``).
+    """
+
+    name: str
+    path: Path
+    hint: str = ""  # e.g. "shown at 00:12:05" or the original caption
+    note: FrameNote | None = None
+
+
+@dataclass
+class SeedUnit:
+    """One slice of one source, drafted on its own: a video chunk or a part of
+    a document. Seeds are raw material — every piece of their content must reach
+    the tutorial, fact-checked and expanded.
+    """
+
+    id: str  # globally unique, e.g. "yt-abc123-c02" / "doc-notes-u01"
+    kind: str  # "video" | "document"
+    source_title: str
+    position: str  # human-readable place in the source, e.g. "part 2 of 4"
+    text: str  # timestamped transcript, or document text
+    figures: list[Figure] = field(default_factory=list)  # attached as images
+    visual_notes: str = ""  # on-screen timeline from frame triage (video only)
