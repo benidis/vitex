@@ -44,7 +44,7 @@ class Config:
 
     # --- Claude backend -----------------------------------------------------
     provider: str = "bedrock"  # "bedrock" | "anthropic"
-    model: str = "us.anthropic.claude-opus-4-8"
+    model: str = "us.anthropic.claude-opus-5-5"
     fix_model: str | None = None  # LaTeX-repair model; falls back to `model`
     # Vision model that rates every distinct video frame. Called once per batch
     # of frames, so a small model (e.g. a Haiku profile) keeps it cheap.
