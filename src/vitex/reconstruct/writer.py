@@ -18,7 +18,7 @@ import json
 import logging
 
 from vitex.config import Config
-from vitex.llm.client import ClaudeClient
+from vitex.llm.client import ClaudeClient, staged
 from vitex.llm.prompts import (
     REVIEW_SCHEMA,
     SECTION_END,
@@ -107,6 +107,7 @@ def _review_and_revise(
 ) -> tuple[str, dict]:
     """Return the final section text and a report of its reviews."""
     report: dict = {"section": section.title, "items": section.items, "figures": section.figures, "rounds": []}
+    label = f"section {idx + 1}/{len(outline.sections)}"
     rsystem, vsystem = review_system(cfg.ground, cfg.guide), revise_system(cfg.ground, cfg.guide)
     for rnd in range(1, cfg.review_rounds + 1):
         checks = mechanical_checks(latex, section, known_figures)
@@ -114,15 +115,16 @@ def _review_and_revise(
             overview=outline.overview(idx), spec=section.spec(), items=items_text, section=latex,
             checks="\n".join(f"- {c}" for c in checks),
         )
-        review = structured_valid(
-            lambda: generate_structured(
-                client, cfg, system=rsystem, text=ruser, schema=REVIEW_SCHEMA,
-                description="Submit the review of the section.", research_allowed=True,
-            ),
-            lambda d: None if "approved" in d else "review lacks a verdict",
-            f"{what} review {rnd}",
-            cfg.generation_attempts,
-        )
+        with staged(client, f"{label} review {rnd}"):
+            review = structured_valid(
+                lambda: generate_structured(
+                    client, cfg, system=rsystem, text=ruser, schema=REVIEW_SCHEMA,
+                    description="Submit the review of the section.", research_allowed=True,
+                ),
+                lambda d: None if "approved" in d else "review lacks a verdict",
+                f"{what} review {rnd}",
+                cfg.generation_attempts,
+            )
         missing, issues = review.get("missing_items", []), review.get("issues", [])
         report["rounds"].append({"review": review, "checks": checks})
         if review.get("approved") and not missing and not checks:
@@ -131,16 +133,17 @@ def _review_and_revise(
             return latex, report
         log.info("%s: review %d — %d missing item(s), %d issue(s), %d check(s); revising",
                  what, rnd, len(missing), len(issues), len(checks))
-        revised = generate_valid(
-            lambda: generate(
-                client, cfg, system=vsystem,
-                text=revise_user(section_request=request, section=latex, review=_review_text(review, checks)),
-                images=image_refs(figures),
-            ),
-            lambda t: check_fragment(t, SECTION_END),
-            f"{what} revision {rnd}",
-            cfg.generation_attempts,
-        )
+        with staged(client, f"{label} revise {rnd}"):
+            revised = generate_valid(
+                lambda: generate(
+                    client, cfg, system=vsystem,
+                    text=revise_user(section_request=request, section=latex, review=_review_text(review, checks)),
+                    images=image_refs(figures),
+                ),
+                lambda t: check_fragment(t, SECTION_END),
+                f"{what} revision {rnd}",
+                cfg.generation_attempts,
+            )
         revised = without_sentinel(revised, SECTION_END)
         if len(revised) < _MIN_KEPT_FRACTION * len(latex):
             log.warning("%s: revision %d dropped %.0f%% of the text; keeping the previous version",
@@ -212,12 +215,13 @@ def write_sections(
             if latex is None:
                 log.info("%s: writing (%d items, %d figures)%s", what, len(sec_items), len(sec_figures),
                          " + research" if cfg.ground else "")
-                latex = generate_valid(
-                    lambda: generate(client, cfg, system=system, text=request, images=image_refs(sec_figures)),
-                    lambda t: check_fragment(t, SECTION_END),
-                    what,
-                    cfg.generation_attempts,
-                )
+                with staged(client, f"section {idx + 1}/{len(outline.sections)} write"):
+                    latex = generate_valid(
+                        lambda: generate(client, cfg, system=system, text=request, images=image_refs(sec_figures)),
+                        lambda t: check_fragment(t, SECTION_END),
+                        what,
+                        cfg.generation_attempts,
+                    )
                 latex = without_sentinel(latex, SECTION_END)
                 write_cached(first_cache, first_key, latex)
             latex, report = _review_and_revise(

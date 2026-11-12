@@ -134,3 +134,28 @@ def test_end_to_end_document_seed(tmp_path, monkeypatch):
     staged = list((result.tex_path.parent / "figures").iterdir())
     assert len(staged) == 1 and staged[0].name in tex  # the document's figure survived end to end
     assert (tmp_path / "work" / "tutorial" / "coverage.json").exists()
+
+
+def test_conform_decodes_stringified_nesting_and_rejects_mismatches():
+    from vitex.llm.client import conform
+    from vitex.llm.prompts import TRIAGE_SCHEMA
+
+    frame = {"name": "f.jpg", "kind": "diagram", "legible": "true", "complete": True, "value": "7",
+             "superseded_by": None, "description": "d", "text": "", "reason": "r"}
+    import json as _json
+
+    # The exact failure seen live: the array arrives as a JSON string.
+    out = conform({"frames": _json.dumps([frame])}, TRIAGE_SCHEMA)
+    assert out["frames"][0]["value"] == 7 and out["frames"][0]["legible"] is True
+    with pytest.raises(ValueError, match="missing required"):
+        conform({"frames": [{"name": "f.jpg"}]}, TRIAGE_SCHEMA)
+    with pytest.raises(ValueError, match="non-JSON"):
+        conform({"frames": "not json"}, TRIAGE_SCHEMA)
+
+
+def test_structured_answer_not_matching_schema_raises_for_retry():
+    client = _bare()
+    schema = {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}
+    client._create = lambda **kw: SimpleNamespace(content=[_tool("submit", {"n": "many"})], stop_reason="tool_use")
+    with pytest.raises(LLMError, match="does not match its schema"):
+        client.complete_structured(system="s", text="u", schema=schema, description="d")

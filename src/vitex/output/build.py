@@ -20,7 +20,7 @@ from pathlib import Path
 
 from vitex.config import Config
 from vitex.errors import BuildError
-from vitex.llm.client import ClaudeClient
+from vitex.llm.client import ClaudeClient, staged
 from vitex.llm.prompts import FIX_FULL_SYSTEM, FIX_SYSTEM, fix_user
 from vitex.output.latex import cite_keys, referenced_figures
 
@@ -178,7 +178,8 @@ def build_pdf(
         full_log = tex_log.read_text(encoding="utf-8", errors="replace") if tex_log.exists() else logtxt
         errors = error_excerpts(full_log, document)
         log_tail = "\n".join(logtxt.splitlines()[-60:])
-        patched = _repair(client, document, fix_user(document, errors, log_tail, rejected), cfg)
+        with staged(client, f"latex repair {attempt}/{_MAX_REPAIRS}"):
+            patched = _repair(client, document, fix_user(document, errors, log_tail, rejected), cfg)
         if patched is None:
             continue
         # A repair must fix the build, never delete content to silence an error.

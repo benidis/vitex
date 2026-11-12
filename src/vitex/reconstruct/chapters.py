@@ -18,7 +18,7 @@ from typing import Callable
 from vitex.config import Config
 from vitex.errors import LLMError
 from vitex.llm import research
-from vitex.llm.client import ClaudeClient, ImageRef
+from vitex.llm.client import ClaudeClient, ImageRef, staged
 from vitex.llm.prompts import (
     BIBLIOGRAPHY_SYSTEM,
     DRAFT_END,
@@ -182,12 +182,13 @@ def draft_seeds(client: ClaudeClient, units: list[SeedUnit], cfg: Config) -> dic
             what, unit.kind, len(unit.text), len(unit.figures), " + research" if cfg.ground else "",
         )
         images = image_refs(unit.figures)
-        latex = generate_valid(
-            lambda: generate(client, cfg, system=system, text=user, images=images),
-            lambda t: check_fragment(t, DRAFT_END),
-            what,
-            cfg.generation_attempts,
-        )
+        with staged(client, f"draft {n}/{len(units)}"):
+            latex = generate_valid(
+                lambda: generate(client, cfg, system=system, text=user, images=images),
+                lambda t: check_fragment(t, DRAFT_END),
+                what,
+                cfg.generation_attempts,
+            )
         latex = without_sentinel(latex, DRAFT_END)
         log.info("%s: uses %d of %d attached figures", what, len(referenced_figures(latex)), len(images))
         write_cached(cache, key, latex)
@@ -233,12 +234,13 @@ def build_bibliography(
         key = pass_key(cfg, "bibliography", BIBLIOGRAPHY_SYSTEM, user)
         part = read_cached(cache, key, cfg.force)
         if part is None:
-            part = generate_valid(
-                lambda: generate(client, cfg, system=BIBLIOGRAPHY_SYSTEM, text=user),
-                check,
-                what,
-                cfg.generation_attempts,
-            )
+            with staged(client, f"bibliography {n}/{len(batches)}"):
+                part = generate_valid(
+                    lambda: generate(client, cfg, system=BIBLIOGRAPHY_SYSTEM, text=user),
+                    check,
+                    what,
+                    cfg.generation_attempts,
+                )
             write_cached(cache, key, part)
         else:
             log.info("%s: cached", what)

@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, field
 
 from vitex.config import Config
 from vitex.errors import LLMError
-from vitex.llm.client import ClaudeClient
+from vitex.llm.client import ClaudeClient, staged
 from vitex.llm.prompts import (
     INVENTORY_SCHEMA,
     INVENTORY_SYSTEM,
@@ -149,15 +149,16 @@ def build_inventory(
             data = json.loads(cached)
             log.info("%s: cached (%d items)", what, len(data["items"]))
         else:
-            data = structured_valid(
-                lambda: generate_structured(
-                    client, cfg, system=INVENTORY_SYSTEM, text=user, schema=INVENTORY_SCHEMA,
-                    description="Record the complete inventory of the draft.", research_allowed=False,
-                ),
-                check,
-                what,
-                cfg.generation_attempts,
-            )
+            with staged(client, f"inventory {u_idx}/{len(units)}"):
+                data = structured_valid(
+                    lambda: generate_structured(
+                        client, cfg, system=INVENTORY_SYSTEM, text=user, schema=INVENTORY_SCHEMA,
+                        description="Record the complete inventory of the draft.", research_allowed=False,
+                    ),
+                    check,
+                    what,
+                    cfg.generation_attempts,
+                )
             write_cached(cache, key, dump(data))
             log.info("%s: %d items", what, len(data["items"]))
         summaries[unit.id] = str(data.get("summary", ""))
@@ -272,15 +273,16 @@ def build_outline(
     text = user
     outline: Outline | None = None
     for attempt in range(1, cfg.outline_attempts + 1):
-        data = structured_valid(
-            lambda: generate_structured(
-                client, cfg, system=system, text=text, schema=OUTLINE_SCHEMA,
-                description="Submit the complete outline of the tutorial.", research_allowed=True,
-            ),
-            check,
-            "Outline",
-            cfg.generation_attempts,
-        )
+        with staged(client, f"outline {attempt}/{cfg.outline_attempts}"):
+            data = structured_valid(
+                lambda: generate_structured(
+                    client, cfg, system=system, text=text, schema=OUTLINE_SCHEMA,
+                    description="Submit the complete outline of the tutorial.", research_allowed=True,
+                ),
+                check,
+                "Outline",
+                cfg.generation_attempts,
+            )
         outline = Outline.from_dict(data)
         if not cfg.guide and outline.excluded:
             # Exclusion is only legitimate when the author's brief asks for it.

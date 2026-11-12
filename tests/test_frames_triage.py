@@ -106,3 +106,27 @@ def test_triage_batches_caches_and_never_loses_a_frame(tmp_path):
     again = FakeTriageClient()
     assert triage_frames(again, frames, [], "V", tmp_path, cfg).keys() == notes.keys()
     assert again.calls == []  # cached
+
+
+def test_triage_resumes_from_cached_batches(tmp_path):
+    import pytest
+
+    from vitex.errors import LLMError
+
+    paths = [_slide(tmp_path / f"v_frame_{i:05d}.jpg", i % 3 + 1) for i in range(4)]
+    frames = [Frame(index=i, timestamp=2.0 * i, path=p, label="") for i, p in enumerate(paths)]
+    cfg = Config(workdir=tmp_path, triage_batch=2, generation_attempts=1)
+
+    class FailsOnSecondBatch(FakeTriageClient):
+        def complete_structured(self, **kw):
+            if len(self.calls) == 1:
+                raise LLMError("boom")
+            return super().complete_structured(**kw)
+
+    with pytest.raises(LLMError):
+        triage_frames(FailsOnSecondBatch(), frames, [], "V", tmp_path, cfg)
+
+    resumed = FakeTriageClient()
+    notes = triage_frames(resumed, frames, [], "V", tmp_path, cfg)
+    assert len(resumed.calls) == 1  # only the failed batch is redone
+    assert set(notes) == {p.name for p in paths}

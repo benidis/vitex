@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import logging
 import random
 import time
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -101,6 +103,66 @@ def _submitted(resp) -> dict | None:
     return None
 
 
+def conform(value, schema: dict, path: str = "answer"):
+    """Coerce ``value`` to ``schema`` where it is unambiguous, else raise ValueError.
+
+    Without forced or strict tool use, models sometimes submit a nested array or
+    object as a JSON-encoded string, or a number as a string. Those are decoded;
+    anything else that does not match the schema (missing required keys, wrong
+    types) is rejected so the caller can retry instead of crashing later.
+    """
+    types = schema.get("type")
+    allowed = set(types) if isinstance(types, list) else {types} if types else set()
+    if value is None and "null" in allowed:
+        return None
+    if isinstance(value, str) and allowed & {"array", "object"}:
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{path}: expected {'/'.join(sorted(allowed))}, got a non-JSON string") from exc
+    if "object" in allowed:
+        if not isinstance(value, dict):
+            raise ValueError(f"{path}: expected an object, got {type(value).__name__}")
+        missing = [k for k in schema.get("required", []) if k not in value]
+        if missing:
+            raise ValueError(f"{path}: missing required {missing}")
+        props = schema.get("properties", {})
+        return {k: conform(v, props[k], f"{path}.{k}") if k in props else v for k, v in value.items()}
+    if "array" in allowed:
+        if not isinstance(value, list):
+            raise ValueError(f"{path}: expected an array, got {type(value).__name__}")
+        item = schema.get("items", {})
+        return [conform(v, item, f"{path}[{i}]") for i, v in enumerate(value)]
+    if "integer" in allowed:
+        if isinstance(value, bool):
+            raise ValueError(f"{path}: expected an integer, got a boolean")
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+            return int(value)
+        if not isinstance(value, int):
+            raise ValueError(f"{path}: expected an integer, got {type(value).__name__}")
+        return value
+    if "boolean" in allowed:
+        if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+            return value.strip().lower() == "true"
+        if not isinstance(value, bool):
+            raise ValueError(f"{path}: expected a boolean, got {type(value).__name__}")
+        return value
+    if "string" in allowed and not isinstance(value, str):
+        if isinstance(value, (int, float)):
+            return str(value)
+        raise ValueError(f"{path}: expected a string, got {type(value).__name__}")
+    return value
+
+
+def _conforming(out: dict, schema: dict) -> dict:
+    try:
+        return conform(out, schema)
+    except ValueError as exc:
+        raise LLMError(f"Structured answer does not match its schema: {exc}") from exc
+
+
 def _is_retryable(exc: Exception) -> bool:
     """True for transient failures (throttling, 5xx, network); False otherwise."""
     import anthropic
@@ -127,6 +189,89 @@ def _with_cache_breakpoints(messages: list[dict]) -> list[dict]:
     return [{**first, "content": content}, *messages[1:]]
 
 
+# Anthropic list prices per million tokens (input, output) used for the run's
+# cost estimate. Bedrock bills separately and may differ; unknown models are
+# counted in tokens only. Cache reads cost 0.1x input, cache writes 1.25x.
+_PRICES = {
+    "opus-5-5": (4.0, 20.0), "opus-5": (5.0, 25.0), "opus-4-8": (5.0, 25.0),
+    "opus-4-7": (5.0, 25.0), "opus-4-6": (5.0, 25.0), "sonnet-5-5": (2.0, 10.0),
+    "sonnet-5": (2.0, 10.0), "sonnet-4-6": (3.0, 15.0), "haiku-5-5": (0.10, 0.50),
+    "haiku-4-5": (1.0, 5.0),
+}
+
+
+def _short(model: str) -> str:
+    """'us.anthropic.claude-opus-5-5' -> 'opus-5-5' (dates/versions dropped)."""
+    name = model.rsplit(".", 1)[-1].removeprefix("claude-")
+    return name.split("-2025")[0].split("-2026")[0].split("-v1")[0]
+
+
+def _price(model: str) -> tuple[float, float] | None:
+    return _PRICES.get(_short(model))
+
+
+def _k(n: int) -> str:
+    return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
+
+
+@dataclass
+class Usage:
+    """Token and cost totals for one model over the run."""
+
+    requests: int = 0
+    input: int = 0  # uncached input tokens
+    cache_read: int = 0
+    cache_write: int = 0
+    output: int = 0
+    seconds: float = 0.0
+    cost: float = 0.0
+    priced: bool = True
+
+
+@dataclass
+class UsageLog:
+    by_model: dict[str, Usage] = field(default_factory=dict)
+
+    def add(self, model: str, usage, seconds: float) -> Usage:
+        u = self.by_model.setdefault(_short(model), Usage())
+        inp = int(getattr(usage, "input_tokens", 0) or 0)
+        read = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+        write = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+        out = int(getattr(usage, "output_tokens", 0) or 0)
+        u.requests += 1
+        u.input, u.cache_read, u.cache_write, u.output = u.input + inp, u.cache_read + read, u.cache_write + write, u.output + out
+        u.seconds += seconds
+        if (price := _price(model)) is None:
+            u.priced = False
+        else:
+            pin, pout = price
+            u.cost += (inp * pin + read * pin * 0.1 + write * pin * 1.25 + out * pout) / 1e6
+        return u
+
+    @property
+    def cost(self) -> float:
+        return sum(u.cost for u in self.by_model.values())
+
+    def summary(self) -> str:
+        lines = []
+        for name, u in self.by_model.items():
+            cost = f"≈${u.cost:.2f}" if u.priced else "cost n/a"
+            lines.append(
+                f"  {name}: {u.requests} requests, {u.seconds / 60:.1f} min, in {_k(u.input)} "
+                f"(+{_k(u.cache_read)} cached, {_k(u.cache_write)} cache-write), out {_k(u.output)}, {cost}"
+            )
+        total = f"≈${self.cost:.2f} at Anthropic list prices (Bedrock bills separately)"
+        return "\n".join(["Claude usage:", *lines, f"  total {total}"])
+
+
+def staged(client, label: str):
+    """``client.stage(label)`` when available (test doubles may lack it)."""
+    from contextlib import nullcontext
+
+    stage = getattr(client, "stage", None)
+    return stage(label) if callable(stage) else nullcontext()
+
+
 @dataclass
 class ImageRef:
     """An image to embed in a request, with the label the model should cite."""
@@ -141,6 +286,17 @@ class ClaudeClient:
         self.cfg = cfg
         self.model = cfg.model
         self._client = self._build_client(cfg)
+        self.usage = UsageLog()
+        self._stage = ""
+
+    @contextmanager
+    def stage(self, label: str):
+        """Label the requests made inside this block in the per-request log."""
+        previous, self._stage = self._stage, label
+        try:
+            yield
+        finally:
+            self._stage = previous
 
     @staticmethod
     def _build_client(cfg: Config):
@@ -290,8 +446,9 @@ class ClaudeClient:
         ``tools`` are given, the model may use them first (same budget rules as
         :meth:`complete_with_tools`); the final call forces ``submit``.
 
-        Raises :class:`LLMError` if no complete submission is produced (e.g. the
-        output hit ``max_tokens``), so callers can retry.
+        The submission is checked against ``schema`` (see :func:`conform`).
+        Raises :class:`LLMError` if no complete, schema-conforming submission is
+        produced (e.g. the output hit ``max_tokens``), so callers can retry.
         """
         submit = {"name": "submit", "description": description, "input_schema": schema}
         blocks = self._build_blocks(text, images or [])
@@ -310,7 +467,7 @@ class ClaudeClient:
                     model=model, max_tokens=max_tokens, system=system, messages=messages, tools=all_tools
                 )
                 if (out := _submitted(resp)) is not None:
-                    return out
+                    return _conforming(out, schema)
                 messages.append({"role": "assistant", "content": [_block_to_dict(b) for b in resp.content]})
                 results: list[dict] = []
                 for b in resp.content:
@@ -333,7 +490,7 @@ class ClaudeClient:
         for nudge in range(_SUBMIT_NUDGES + 1):
             resp = self._create(model=model, max_tokens=max_tokens, system=system, messages=messages, tools=all_tools)
             if (out := _submitted(resp)) is not None:
-                return out
+                return _conforming(out, schema)
             if getattr(resp, "stop_reason", None) in ("max_tokens", "refusal") or nudge == _SUBMIT_NUDGES:
                 break
             messages.append({"role": "assistant", "content": [_block_to_dict(b) for b in resp.content]})
@@ -444,8 +601,9 @@ class ClaudeClient:
         for attempt in range(1, attempts + 1):
             try:
                 # Streaming avoids HTTP timeouts on long generations.
+                started = time.monotonic()
                 with self._client.messages.stream(**kwargs) as stream:
-                    return stream.get_final_message()
+                    resp = stream.get_final_message()
             except Exception as exc:  # noqa: BLE001 - normalized into LLMError below
                 if not _is_retryable(exc):
                     raise LLMError(f"Claude request failed (not retryable): {exc}") from exc
@@ -460,4 +618,29 @@ class ClaudeClient:
                     wait,
                 )
                 time.sleep(wait)
+                continue
+            # Outside the retry path: a logging problem must never fail a call.
+            try:
+                self._log_request(model, resp, time.monotonic() - started)
+            except Exception as exc:  # noqa: BLE001 - logging is best-effort
+                log.debug("Request logging failed: %s", exc)
+            return resp
         raise AssertionError("unreachable")  # pragma: no cover
+
+    def _log_request(self, model: str, resp, seconds: float) -> None:
+        """One line per request: stage, model, time, tokens, stop reason, run total."""
+        if not hasattr(self, "usage"):  # clients built without __init__ (tests)
+            self.usage, self._stage = UsageLog(), ""
+        usage = getattr(resp, "usage", None)
+        self.usage.add(model, usage, seconds)
+        inp = int(getattr(usage, "input_tokens", 0) or 0)
+        read = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+        out = int(getattr(usage, "output_tokens", 0) or 0)
+        tools = [b.name for b in getattr(resp, "content", []) if getattr(b, "type", None) == "tool_use"]
+        stop = getattr(resp, "stop_reason", None)
+        detail = f"{stop}: {', '.join(tools)}" if tools else stop
+        log.info(
+            "  claude %s %s · %.0fs · in %s (+%s cached) · out %s · %s · run ≈$%.2f",
+            f"[{self._stage}]" if self._stage else "", _short(model), seconds,
+            _k(inp), _k(read), _k(out), detail, self.usage.cost,
+        )

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from vitex.config import Config
 from vitex.errors import LLMError
-from vitex.llm.client import ClaudeClient, ImageRef
+from vitex.llm.client import ClaudeClient, ImageRef, staged
 from vitex.llm.prompts import TRIAGE_SCHEMA, TRIAGE_SYSTEM, triage_user
 from vitex.models import Frame, FrameNote, Segment, _fmt_timestamp
 from vitex.utils import fingerprint, read_cached, write_cached
@@ -83,28 +83,38 @@ def triage_frames(
             f"\"{_narration_near(segments, f.timestamp)[:600]}\""
             for f in batch
         )
+        # Each batch is cached on its own, so an interrupted triage resumes
+        # without paying again for the batches already rated.
+        batch_cache = workdir / "triage" / f"batch_{n:03d}.json"
+        batch_key = fingerprint(key, lines)
+        cached_batch = read_cached(batch_cache, batch_key, cfg.force)
+        result: dict | None = json.loads(cached_batch) if cached_batch is not None else None
         images = [ImageRef(path=f.path, label=f.path.name, caption_hint=f.timestamp_text) for f in batch]
-        result: dict | None = None
         for attempt in range(1, cfg.generation_attempts + 1):
+            if result is not None:
+                break
             try:
-                result = client.complete_structured(
-                    system=TRIAGE_SYSTEM,
-                    text=triage_user(video_title, lines),
-                    schema=TRIAGE_SCHEMA,
-                    description="Record the assessment of every frame in the batch.",
-                    images=images,
-                    model=cfg.effective_triage_model,
-                    max_tokens=8192,
-                )
+                with staged(client, f"triage {n}/{len(batches)}"):
+                    result = client.complete_structured(
+                        system=TRIAGE_SYSTEM,
+                        text=triage_user(video_title, lines),
+                        schema=TRIAGE_SCHEMA,
+                        description="Record the assessment of every frame in the batch.",
+                        images=images,
+                        model=cfg.effective_triage_model,
+                        max_tokens=8192,
+                    )
                 break
             except LLMError as exc:
                 log.warning("Triage batch %d/%d failed (%s); attempt %d/%d", n, len(batches), exc, attempt, cfg.generation_attempts)
         if result is None:
             raise LLMError(f"Frame triage failed for batch {n} after {cfg.generation_attempts} attempts.")
+        if cached_batch is None:
+            write_cached(batch_cache, batch_key, json.dumps(result, ensure_ascii=False))
 
         order = {f.path.name: i for i, f in enumerate(batch)}
         for entry in result.get("frames", []):
-            if entry.get("name") in names:
+            if isinstance(entry, dict) and entry.get("name") in names:
                 note = FrameNote.from_dict(entry)
                 # Only one of the next few frames of the batch can supersede: a
                 # slide being built up spans consecutive visual states. Requiring

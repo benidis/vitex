@@ -29,7 +29,10 @@ def setup_logging(verbose: bool = False) -> None:
         datefmt="%H:%M:%S",
     )
     log.setLevel(logging.DEBUG if verbose else logging.INFO)
-    for noisy in ("httpx", "httpcore", "botocore", "boto3", "urllib3", "huggingface_hub", "faster_whisper", "filelock"):
+    for noisy in (
+        "httpx", "httpx2", "httpcore", "httpcore2", "anthropic", "botocore", "boto3",
+        "urllib3", "huggingface_hub", "faster_whisper", "filelock",
+    ):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 

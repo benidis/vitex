@@ -148,6 +148,16 @@ class Pipeline:
         cfg.workdir.mkdir(parents=True, exist_ok=True)
         cfg.outdir.mkdir(parents=True, exist_ok=True)
         client = ClaudeClient(cfg)
+        try:
+            return self._run(client)
+        finally:
+            # Also on failure, so the spend of an interrupted run is visible.
+            usage = getattr(client, "usage", None)
+            if usage is not None and usage.by_model:
+                log.info("%s", usage.summary())
+
+    def _run(self, client: ClaudeClient) -> Result:
+        cfg = self.cfg
 
         units: list[SeedUnit] = []
         figures: dict[str, Figure] = {}
