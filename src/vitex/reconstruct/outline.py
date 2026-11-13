@@ -227,11 +227,13 @@ def outline_problems(outline: Outline, items: list[Item], figures: set[str]) -> 
 
 
 def repair_outline(outline: Outline, items: list[Item], figures: set[str]) -> list[str]:
-    """Make the outline complete in code; return a description of each change.
+    """Make the outline usable in code; return a description of each change.
 
-    Unknown ids and figure names are removed; every unplaced item, and every
-    figure an item uses but no section includes, is attached to the section
-    holding the most items from the same seed unit (or the last core section).
+    Unknown ids and figure names are removed. Items the outline neither placed
+    nor omitted are routed to the section holding the most material from the
+    same source unit, as notes the writer may draw on (the plan, not the item
+    list, decides what the tutorial covers). A figure an item uses but no
+    section includes is attached to a section that has that item, if any.
     """
     by_id = {i.id: i for i in items}
     changes: list[str] = []
@@ -252,17 +254,22 @@ def repair_outline(outline: Outline, items: list[Item], figures: set[str]) -> li
         return best if score(best) > 0 else body[-1]
 
     placed = {i for s in outline.sections for i in s.items} | {str(e.get("id")) for e in outline.omitted}
+    routed = 0
     for item in items:
         if item.id not in placed:
-            target = home(item)
-            target.items.append(item.id)
-            target.plan.append(f"Cover in full: {item.title}")
-            changes.append(f"attached {item.id} ({item.title}) to '{target.title}'")
+            home(item).items.append(item.id)
+            routed += 1
+    if routed:
+        changes.append(f"routed {routed} unplaced item(s) to the nearest section as material")
 
     for item in items:
         for fig in item.figures:
             if fig in figures and not any(fig in s.figures for s in outline.sections):
-                target = next(s for s in outline.sections if item.id in s.items)
+                # Only a section that actually has this item can show its figure;
+                # an omitted item's figure is simply not used.
+                target = next((s for s in outline.sections if item.id in s.items), None)
+                if target is None:
+                    continue
                 target.figures.append(fig)
                 changes.append(f"attached figure {fig} to '{target.title}'")
     return changes
@@ -399,6 +406,14 @@ def build_outline(
         return None if data.get("sections") else "outline has no sections"
 
     log.info("Outlining %d items from %d seed units%s...", len(items), len(units), " + research" if cfg.ground else "")
+    # The raw answer is cached before any post-processing, so a failure after
+    # the (expensive) outline call does not pay for it again.
+    raw_cache = cfg.tutorial_dir / "outline.raw.json"
+    raw = read_cached(raw_cache, key, cfg.force)
+    if raw is not None:
+        log.info("Outline: reusing the cached outline answer")
+        return _finish_outline(Outline.from_dict(json.loads(raw)), items, fig_names, entries, cfg, budget_words, frame_words, cache, key)
+
     text = user
     outline: Outline | None = None
     for attempt in range(1, cfg.outline_attempts + 1):
@@ -426,7 +441,22 @@ def build_outline(
         )
     if outline is None:  # pragma: no cover - loop runs at least once
         raise LLMError("Outline: no outline produced.")
+    write_cached(raw_cache, key, dump(data))
+    return _finish_outline(outline, items, fig_names, entries, cfg, budget_words, frame_words, cache, key)
 
+
+def _finish_outline(
+    outline: Outline,
+    items: list[Item],
+    fig_names: set[str],
+    entries: list[dict] | None,
+    cfg: Config,
+    budget_words: int,
+    frame_words: int,
+    cache,
+    key: str,
+) -> Outline:
+    """Repair, allocate lengths, log, and cache a fresh outline answer."""
     for change in repair_outline(outline, items, fig_names):
         log.warning("Outline fix: %s", change)
     if entries:

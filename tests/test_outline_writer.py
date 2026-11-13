@@ -36,7 +36,8 @@ def test_repair_outline_places_every_item_and_figure():
     attention = outline.sections[1]
     assert "I1.01" in attention.items  # same unit as I1.02 -> same section
     assert "f1.jpg" in attention.figures  # figure follows its item
-    assert any("attached I1.01" in c for c in changes)
+    assert any("routed 1 unplaced item(s)" in c for c in changes)
+    assert any("removed unknown" in c for c in changes)
 
 
 class OutlineClient:
@@ -361,3 +362,49 @@ def test_cli_parses_section_lists():
     from vitex.cli import _section_list
 
     assert _section_list("2,5") == [2, 5] and _section_list("1,3-5") == [1, 3, 4, 5]
+
+
+def test_figure_of_an_omitted_item_does_not_crash_the_repair():
+    """Regression: an omitted item is in no section, so its figure has no home."""
+    from vitex.reconstruct.outline import repair_outline
+
+    items = _items()  # I1.01 uses f1.jpg
+    outline = Outline(title="T", reader_background="b", notation=[], sections=[
+        _sec("Intro", "introduction", []), _sec("Body", "core", ["I1.02"]),
+    ])
+    outline.omitted = [{"id": "I1.01", "reason": "outside the plan"}, {"id": "I2.01", "reason": "outside the plan"}]
+    changes = repair_outline(outline, items, {"f1.jpg"})
+    assert all("f1.jpg" not in c for c in changes)  # the figure is simply unused
+    assert not any("f1.jpg" in s.figures for s in outline.sections)
+    assert outline.sections[1].items == ["I1.02"]  # omitted items are not force-attached
+
+
+def test_unplaced_items_are_routed_as_material_without_plan_lines():
+    from vitex.reconstruct.outline import repair_outline
+
+    outline = Outline(title="T", reader_background="b", notation=[], sections=[
+        _sec("Intro", "introduction", []), _sec("Body", "core", ["I1.01"]),
+    ])
+    changes = repair_outline(outline, outline and _items(), {"f1.jpg"})
+    body = outline.sections[1]
+    assert set(body.items) == {"I1.01", "I1.02", "I2.01"}
+    assert body.plan == ["p"]  # no "Cover in full" requirements added
+    assert any("routed 2 unplaced item(s)" in c for c in changes)
+
+
+def test_outline_answer_is_cached_before_post_processing(tmp_path):
+    class OnceClient(OutlineClient):
+        def complete_structured(self, **kw):
+            data = super().complete_structured(**kw)
+            data["sections"][0]["items"] = ["I1.01", "I1.02", "I2.01"]
+            return data
+
+    units = [SeedUnit(id=u, kind="video", source_title="V", position="p", text="t") for u in ("u1", "u2")]
+    cfg = Config(name="t", workdir=tmp_path, ground=False)
+    client = OnceClient()
+    build_outline(client, units, _items(), {}, [], cfg, 5000)
+    assert (tmp_path / "runs" / "t" / "outline.raw.json").exists()
+
+    again = OnceClient()
+    build_outline(again, units, _items(), {}, [], cfg, 5000)
+    assert again.calls == []  # reused without another model call
