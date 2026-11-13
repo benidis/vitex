@@ -82,14 +82,15 @@ class SectionJob:
     section: Section
     label: str  # e.g. "section 3/14" (log stage)
     what: str  # e.g. "Section 3/14 'Policy Gradients'" (log messages)
-    items_text: str
+    spec: str  # the section's specification, incl. its plan entries and levels
     map_text: str
     request: str  # the full writing brief
     figures: list[Figure]
 
 
-def _items_text(items: list[Item]) -> str:
-    return "\n".join(f"- {i.id} | {i.kind} | {i.importance} | {i.title}\n    {i.detail.strip()}" for i in items)
+def _source_notes(items: list[Item]) -> str:
+    """Key points from the sources routed to a section: material, not a checklist."""
+    return "\n".join(f"- {i.title} ({i.kind}): {i.detail.strip()}" for i in items)
 
 
 _FLOAT_WORDS = 150  # page space of a figure, table, or algorithm box, in words
@@ -151,8 +152,11 @@ def section_jobs(
     drafts: dict[str, str],
     units: list[SeedUnit],
     figures: dict[str, Figure],
+    levels: dict[str, str] | None = None,
 ) -> list[SectionJob]:
-    """Build the writing brief of every section."""
+    """Build the writing brief of every section. ``levels`` maps plan entry
+    names to their level (main / stepping / mention)."""
+    level_of = {" ".join(k.lower().split()): v for k, v in (levels or {}).items()}
     by_id = {i.id: i for i in items}
     unit_by_id = {u.id: u for u in units}
     # One shared key list, so independently written sections cite a work alike.
@@ -163,15 +167,16 @@ def section_jobs(
     n = len(outline.sections)
     for idx, section in enumerate(outline.sections):
         sec_items = [by_id[i] for i in section.items if i in by_id]
-        items_text = _items_text(sec_items)
         sec_figures = [figures[f] for f in section.figures if f in figures]
         map_text = outline.map(by_id, mark=idx)
+        entries = "; ".join(f"{t} ({level_of.get(' '.join(t.lower().split()), 'entry')})" for t in section.topics)
+        spec = section.spec() + f"\nPlan entries covered here: {entries or '(none)'}"
         request = section_user(
             title=outline.title,
             overview=map_text,
             notation=outline.notation_text(),
-            spec=section.spec(),
-            items=items_text,
+            spec=spec,
+            items=_source_notes(sec_items),
             material=_material(sec_items, drafts, unit_by_id),
             figure_lines=figure_lines(sec_figures),
             neighbors=_neighbors(outline, idx),
@@ -180,7 +185,7 @@ def section_jobs(
         jobs.append(
             SectionJob(
                 idx=idx, section=section, label=f"section {idx + 1}/{n}",
-                what=f"Section {idx + 1}/{n} '{section.title}'", items_text=items_text,
+                what=f"Section {idx + 1}/{n} '{section.title}'", spec=spec,
                 map_text=map_text, request=request, figures=sec_figures,
             )
         )
@@ -194,7 +199,7 @@ def mechanical_checks(latex: str, section: Section, known_figures: set[str]) -> 
     if target > 0 and words > _OVER_BUDGET * target:
         problems.append(
             f"the section is {words} words, {100 * words / target - 100:.0f}% over its target of {target}; "
-            "cut what teaches least (proofs, tangents, repetition, extras that add little)"
+            "remove whole pieces of least importance — do not compress the explanations"
         )
     elif target > 0 and words < _UNDER_BUDGET * target:
         problems.append(f"the section is {words} words, far below its target of {target}; check for under-explained ideas")
@@ -207,7 +212,7 @@ def mechanical_checks(latex: str, section: Section, known_figures: set[str]) -> 
 
 
 def _review_text(review: dict, checks: list[str]) -> str:
-    lines = [f"- MISSING item {m['id']}: {m['what_is_missing']}" for m in review.get("missing_items", [])]
+    lines = [f"- MISSING {m.get('entry', '')}: {m['what_is_missing']}" for m in review.get("missing", [])]
     lines += [f"- ISSUE at {i['location']}: {i['problem']} -> FIX: {i['fix']}" for i in review.get("issues", [])]
     lines += [f"- CHECK: {c}" for c in checks]
     return "\n".join(lines)
@@ -218,12 +223,12 @@ def _review_and_revise(
 ) -> tuple[str, dict]:
     """Return the final section text and a report of its reviews."""
     section = job.section
-    report: dict = {"section": section.title, "items": section.items, "figures": section.figures, "rounds": []}
+    report: dict = {"section": section.title, "entries": section.topics, "figures": section.figures, "rounds": []}
     rsystem, vsystem = review_system(cfg.ground, cfg.guide), revise_system(cfg.ground, cfg.guide)
     for rnd in range(1, cfg.review_rounds + 1):
         checks = mechanical_checks(latex, section, known_figures)
         ruser = review_user(
-            overview=job.map_text, spec=section.spec(), items=job.items_text, section=latex,
+            overview=job.map_text, spec=job.spec, section=latex,
             checks="\n".join(f"- {c}" for c in checks), length=length_note(latex, section.target_words),
         )
         with staged(client, f"{job.label} review {rnd}"):
@@ -236,13 +241,13 @@ def _review_and_revise(
                 f"{job.what} review {rnd}",
                 cfg.generation_attempts,
             )
-        missing, issues = review.get("missing_items", []), review.get("issues", [])
+        missing, issues = review.get("missing", []), review.get("issues", [])
         report["rounds"].append({"review": review, "checks": checks})
         if review.get("approved") and not missing and not checks:
             log.info("%s: approved in review round %d", job.what, rnd)
             report["approved"] = True
             return latex, report
-        log.info("%s: review %d — %d missing item(s), %d issue(s), %d check(s); revising",
+        log.info("%s: review %d — %d missing, %d issue(s), %d check(s); revising",
                  job.what, rnd, len(missing), len(issues), len(checks))
         with staged(client, f"{job.label} revise {rnd}"):
             revised = generate_valid(
@@ -261,7 +266,9 @@ def _review_and_revise(
                         job.what, rnd, 100 * (1 - effective_words(revised) / max(1, effective_words(latex))))
             report["rounds"][-1]["revision_rejected"] = True
             continue
-        latex = revised
+        # Additions must not push the section past its target: if they did,
+        # remove the least important material again.
+        latex = fit_length(client, cfg, job, revised)
     report["final_checks"] = mechanical_checks(latex, section, known_figures)
     if not cfg.review_rounds:
         report["approved"] = None  # review disabled
@@ -271,38 +278,60 @@ def _review_and_revise(
     return latex, report
 
 
-def _condense(client: ClaudeClient, cfg: Config, job: SectionJob, latex: str) -> str:
-    """Bring a first version that is well over its target back toward it."""
+def fit_length(client: ClaudeClient, cfg: Config, job: SectionJob, latex: str) -> str:
+    """Bring a section that is well over its target back to it — by removing
+    the least important material, never by compressing what stays.
+
+    Used after the first version, after every revision, and once more on the
+    final text, so additions from reviews and edits cannot accumulate. Cached
+    by the section's text, so a rerun does not repeat it.
+    """
     target, words = job.section.target_words, effective_words(latex)
     if target <= 0 or words <= _OVER_BUDGET * target:
         return latex
-    log.info("%s: first version is %d words against a target of %d; condensing", job.what, words, target)
+    cache = cfg.tutorial_dir / "sections" / "fit" / f"section_{job.idx:03d}.tex"
+    key = pass_key(cfg, "fit", revise_system(cfg.ground, cfg.guide), latex, target)
+    cached = read_cached(cache, key, cfg.force)
+    if cached is not None:
+        return cached
+    log.info("%s: %d words against a target of %d; removing the least important material", job.what, words, target)
     notes = (
-        f"- CHECK: the section is {words} words (figures, tables, and algorithms count ~{_FLOAT_WORDS} each) "
-        f"against a target of {target}. Condense it to about {target}: cut what teaches least first "
-        "(proofs, tangents, repetition, extra examples, over-developed minor points), keep the key "
-        "derivations, and keep every assigned item at its level."
+        f"- LENGTH: the section is {words} words (figures, tables, and algorithms count ~{_FLOAT_WORDS} each) "
+        f"against a target of {target}. Bring it to about {target} by REMOVING whole pieces of least "
+        "importance for the reader — an extra example, a side remark, a detail that is not needed, a minor "
+        "point reduced to one sentence. Do not compress: every explanation you keep stays exactly as complete "
+        "and readable as it is now. Keep the plan entries of this section at their levels."
     )
-    with staged(client, f"{job.label} condense"):
-        condensed = generate_valid(
+    with staged(client, f"{job.label} fit"):
+        fitted = generate_valid(
             lambda: generate(
                 client, cfg, system=revise_system(cfg.ground, cfg.guide),
                 text=revise_user(section_request=job.request, section=latex, review=notes),
                 images=image_refs(job.figures),
             ),
             lambda t: check_fragment(t, SECTION_END),
-            f"{job.what} condense",
+            f"{job.what} fit",
             cfg.generation_attempts,
         )
-    condensed = without_sentinel(condensed, SECTION_END)
-    if effective_words(condensed) < min_kept_words(words, target):
-        log.warning("%s: condensing cut too much; keeping the first version", job.what)
-        return latex
-    return condensed
+    fitted = without_sentinel(fitted, SECTION_END)
+    if effective_words(fitted) < min_kept_words(words, target):
+        log.warning("%s: fitting removed too much; keeping the longer version", job.what)
+        fitted = latex
+    write_cached(cache, key, fitted)
+    return fitted
+
+
+def fit_lengths(client: ClaudeClient, cfg: Config, jobs: list[SectionJob], sections: list[str]) -> list[str]:
+    """Final length pass over the finished sections (in parallel)."""
+    return run_parallel(lambda pair: fit_length(client, cfg, pair[0], pair[1]), list(zip(jobs, sections)), cfg.parallel)
 
 
 def write_sections(
-    client: ClaudeClient, jobs: list[SectionJob], figures: dict[str, Figure], cfg: Config
+    client: ClaudeClient,
+    jobs: list[SectionJob],
+    figures: dict[str, Figure],
+    cfg: Config,
+    report_name: str = "coverage.json",
 ) -> list[str]:
     """Write, review, and cache every section (in parallel)."""
     system = section_system(cfg.ground, cfg.guide)
@@ -328,7 +357,7 @@ def write_sections(
         first_key = pass_key(cfg, "section-first", system, job.request)
         latex = read_cached(first_cache, first_key, cfg.force)
         if latex is None:
-            log.info("%s: writing (%d items, %d figures)%s", job.what, len(job.section.items),
+            log.info("%s: writing (%d plan entries, %d figures)%s", job.what, len(job.section.topics),
                      len(job.figures), " + research" if cfg.ground else "")
             with staged(client, f"{job.label} write"):
                 latex = generate_valid(
@@ -338,7 +367,7 @@ def write_sections(
                     cfg.generation_attempts,
                 )
             latex = without_sentinel(latex, SECTION_END)
-            latex = _condense(client, cfg, job, latex)
+            latex = fit_length(client, cfg, job, latex)
             write_cached(first_cache, first_key, latex)
         latex, report = _review_and_revise(client, cfg, job, latex, known_figures)
         write_cached(cache, key, latex)
@@ -352,7 +381,7 @@ def write_sections(
     reports = [report for _, report in results]
 
     cfg.tutorial_dir.mkdir(parents=True, exist_ok=True)
-    (cfg.tutorial_dir / "coverage.json").write_text(dump(reports), encoding="utf-8")
+    (cfg.tutorial_dir / report_name).write_text(dump(reports), encoding="utf-8")
     unapproved = [r["section"] for r in reports if r.get("approved") is False]
     if unapproved:
         log.warning("%d section(s) not fully approved by review: %s", len(unapproved), "; ".join(unapproved))

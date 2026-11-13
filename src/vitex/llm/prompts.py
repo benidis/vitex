@@ -25,91 +25,45 @@ from __future__ import annotations
 
 TUTORIAL_STANDARD = r"""
 THE STANDARD THE TUTORIAL MUST MEET
-It is a TUTORIAL — not a summary, not a survey, not a gathering of methods. The
-reader has general technical maturity (comfortable with undergraduate linear
-algebra, calculus, probability, and programming) but has NEVER studied this
-topic. Reading front to back, with no other material and without the source
-videos or documents, they must understand all of it.
-1. Problem first. Introduce every idea through the problem it solves, stated in
-   terms the reader already understands from earlier material. Set the problem up
-   — the setting, what is given, what is wanted, and why the obvious approach
-   falls short — before presenting the solution.
-2. Intuition, then formalism. Explain the idea in words (with a concrete example
-   or analogy where it helps), then give the precise math, then tie every symbol
-   back to the intuition.
-3. No logical jumps in what you derive. Derive the results that explain how a
-   method works — its objective, gradient, update rule, and the key identities
-   it relies on — step by step, saying what was done at each step and why. Do
-   not derive general background (basic probability, set theory, standard
-   inequalities): assume it or state it in a line. Theorems (convergence
-   guarantees, bounds, optimality results) are stated precisely, with the
-   intuition for why they hold and a citation for the proof; do not prove them
-   unless the proof itself shows how the method works.
-4. No assumed knowledge of the topic. Define every term and symbol at its first
-   use. If a tool from outside the topic is needed, explain it briefly where it
-   is first needed.
-5. Nothing out of the blue. Every method appears because the reader now needs
-   it: first make clear the need or limitation, arising from what came before,
-   that motivates it.
-6. Flow. The tutorial reads as one continuous, well-structured text: each part
-   follows naturally from what came before, and the reader always knows why the
-   current material matters. How a section opens, connects, and closes is
-   decided by what fits that section — its purpose and its relation to the
-   sections around it. A motivating question, a short signpost, or a brief recap
-   is fine where it genuinely helps the reader; none is required, and none is
-   applied as a template. Use one consistent notation throughout.
-7. Build up. Easier before harder, concrete before abstract, the special case
-   before the general one. Where it teaches best, follow the arc: the problem,
-   the natural first attempt, exactly why it falls short, then the better
-   solution.
-8. Depth follows the idea's LEVEL in the plan — not the source, and not "as
-   much as possible". You are responsible for the reader understanding every
-   idea that is included, however well or badly a source explained it, and for
-   spending the reader's time where it matters:
-   - MAIN LINE (core): the full treatment — problem setup, intuition, the key
-     derivation step by step, and, where they teach, the algorithm, cost
-     analysis, and a worked example.
-   - STEPPING STONE (supporting): compact but proper — which problem of the
-     base method it addresses, the idea, the key equation(s) and what changes
-     relative to the base method (derived briefly), how it is used in practice,
-     and the trade-off. The reader must follow the why and the how; a one-line
-     mention is not enough.
-   - MENTION (brief): a few sentences in context — what it is and why it is not
-     developed further — or a row in a comparison table, with a citation.
-   Whatever is included is treated properly at its level, with a flow. A
-   source's brevity is never a reason to under-explain a main-line idea; a
-   source's length is never a reason to over-explain a minor one.
-9. Use extras where they teach, not by default:
-   - an algorithm box (pseudocode as it is run in practice) for core methods,
-     and for variants whose procedure differs materially;
-   - a cost/complexity analysis where cost is what motivates the next idea or
-     drives the choice between methods;
-   - a worked numerical example where a mechanism is not obvious from the
-     equations — not one per method;
-   - a comparison table to set related variants side by side.
-10. Economy. Every paragraph must earn its place: complete on what matters,
-   concise everywhere else. No repetition, no exhaustive enumerations, no
-   tangents, no proofs. Respect the length target you are given; when a section
-   is over it, cut what teaches least first.
+It is a TUTORIAL on its topic — not a summary, and not a survey of every method
+that exists. The reader has general technical maturity (undergraduate linear
+algebra, calculus, probability, programming) but is new to this topic. Reading
+front to back, with no other material, they must understand everything that is
+included.
+1. Problem first. Introduce each idea through the problem it solves, set up in
+   terms the reader already has, before the solution. Give the intuition, then
+   the precise math, and tie the symbols back to the intuition.
+2. Explain, don't compress. Write at the pace of a good textbook, in full
+   sentences that let the reader follow every step. Explain each term —
+   including hardware and systems terms — when it first appears. Derive what
+   explains how a method works (its objective, gradient, update rule, key
+   identities) step by step; state theorems with their intuition and a
+   citation rather than proving them; assume general background math.
+3. Depth follows the plan. Main-line entries get the full treatment: the
+   problem, the intuition, the derivation, and — where they teach — the
+   algorithm as it is run in practice, a cost analysis, and a worked example.
+   Stepping stones get a compact but proper explanation: the problem they fix,
+   the idea, the key equation, how they are used, and the trade-off. Mentions
+   get a few sentences in context.
+4. Fit by choosing, never by squeezing. Each section has a target length. If
+   the material does not fit, leave out the least important parts entirely —
+   an extra example, a side remark, a detail the reader can do without — and
+   keep what remains fully explained.
+5. Flow. One continuous text, built up from easier to harder; each part follows
+   from what came before, and the reader always knows why it matters. Openings,
+   transitions, and closings fit the section; there are no templates. One
+   notation throughout.
+6. Concrete where it helps: worked examples with real numbers where a mechanism
+   is not obvious from the equations, and comparison tables to set related
+   methods side by side.
 """.strip()
 
 SEED_RULES = r"""
-HOW TO TREAT THE SOURCES
-The videos and documents are SEEDS, not the product. The result must be better
-organized, clearer, and more correct than any of them.
-- Keep every idea of substance from every seed — concepts, definitions, key
-  equations and results, numbers, examples, figures, comparisons, caveats — at
-  the depth its role warrants: a central result keeps its full development, a
-  minor point may become a sentence or a table row. Nothing is silently lost.
-- Fact-check all of it. Where a source is wrong, imprecise, ambiguous, or cut off,
-  state the correct version as plain fact (do not tell the reader the source was
-  wrong, and never write "the video says") and cite the source of record.
-- Add the motivation, intermediate steps, and background the sources skipped
-  where the reader needs them.
-- Sources are uneven: fragmentary, out of order, repetitive, rushed in places,
-  and mixing setup with solutions. Merge overlapping material into one best
-  treatment, fill the gaps, and choose the most educational order and
-  presentation yourself — no source's order or phrasing is a constraint.
+THE SOURCES
+The videos and documents are sources, not the product. Use them as material,
+fact-check them, state the correct version as plain fact where a source is
+wrong or unclear (citing the source of record; never "the video says"), and
+reorganize freely. The plan decides what the tutorial includes, not the sources.
 """.strip()
 
 
@@ -130,10 +84,16 @@ something out."""
 
 _RESEARCH_GROUNDED = r"""
 RESEARCH AND CITATIONS
-- Use the research tools (arxiv_search, web_search, fetch_url) to verify every
-  nontrivial claim, formula, number, and attribution, and to find the primary
-  source for each idea (the paper that introduced it). Prefer arXiv for ML, math,
-  and CS. Research thoroughly — checking is worth the time.
+- Research verifies and sources what the plan includes; it does not add to the
+  scope. Use the tools (paper_search, arxiv_search, web_search, fetch_url) to
+  check claims, formulas, numbers, and attributions, and to find the primary
+  source of each idea. Do not introduce methods or results because a search
+  turned them up.
+- Cite primary and established work: the paper that introduced a method,
+  peer-reviewed or widely cited papers (paper_search shows venues and citation
+  counts), official documentation. Low-citation preprints and blogs are weak
+  evidence — do not rely on them for central claims; judge very recent work by
+  its role in the plan, since it has had little time to be cited.
 - Cite with \cite{key}, using descriptive keys such as vaswani2017attention;
   reuse the same key for the same work. Never invent a citation — look it up. Do
   not write a bibliography; a later pass builds it from the keys.
@@ -264,16 +224,11 @@ for one part of a tutorial. You are given one SEED UNIT: a slice of an
 educational video (timestamped transcript, the most valuable frames as images,
 and a timeline of everything shown on screen) or a part of an existing document.
 
-Your draft is the raw material a later pass organizes into the final tutorial,
-so COMPLETENESS and CORRECTNESS come first: everything the seed teaches must be
-in your draft — verified, corrected where needed, and explained to the standard
-below. Write it as real tutorial prose (not notes), in LaTeX.
-
-The final tutorial can only be as good as this material. Wherever the seed
-rushes through an important idea, only names it, skips steps, or explains it
-poorly, give that idea the treatment its role warrants HERE (rule 8) — sized to
-its role and difficulty, not to the seed's coverage, and not inflated. Respect
-the length target given with the seed.
+Your draft is the material a later pass draws on to write the tutorial: verified,
+corrected where needed, and explained to the standard below, for the topics the
+plan includes. Write it as real tutorial prose (not notes), in LaTeX. Where the
+seed rushes through or poorly explains an idea the plan includes, explain it
+properly here. Respect the length target given with the seed.
 
 {TUTORIAL_STANDARD}
 
@@ -753,11 +708,11 @@ Your previous outline:
 
 def section_system(ground: bool, guide: str | None = None) -> str:
     return f"""
-You are the author writing ONE section of a tutorial, following the outline
-designed for the whole tutorial. You get the full outline (so you know what the
-reader has already learned and what comes later), this section's specification,
-the content items it must cover, the fact-checked draft material those items
-come from, its figures, and the plans of the sections just before and after it.
+You are the author writing ONE section of a tutorial. You get a map of the whole
+tutorial (what the reader already knows and what comes later), this section's
+specification (the plan entries it covers with their levels, its plan, and its
+target length), source material (fact-checked drafts and notes from the
+sources), its figures, and the plans of the sections just before and after it.
 
 {TUTORIAL_STANDARD}
 
@@ -765,33 +720,20 @@ come from, its figures, and the plans of the sections just before and after it.
 
 {research_rules(ground)}
 
-WRITING THIS SECTION
-- Cover every assigned item at the depth its role warrants (rule 8; the
-  section's depth and each item's importance are given). The draft material is
-  your source: improve its explanations, select what teaches, and drop nothing
-  of substance — but do not reproduce everything a draft elaborates.
-- Where the draft material is thin or rushed on an important idea (because a
-  source was), write the missing setup, intuition, and derivation steps
-  yourself — you are responsible for the reader understanding it.
-- The section's target length (given in its specification) is a CAP: stay at
-  or under it. Each figure, table, or algorithm box counts as about 150 words.
-  Spend the words on what the plan makes main line, keep stepping stones
-  compact, and leave out proofs, exhaustive lists, and tangents.
-- Follow the plan's order. Cover the listed new_material where it is needed.
-- Connect to what the reader has just learned and to what comes next in
-  whatever way fits this section's purpose — the neighbouring sections' plans
-  tell you exactly what they cover. There is no fixed template for openings or
-  closings. Never re-teach earlier sections (refer back to them), and do not
-  cover material that belongs to later sections. The outline's "purpose" is a
-  planning note for you, not text to reproduce.
-- Use the outline's notation exactly. Cite a work with the key listed for it
-  below when one exists.
-- Include every assigned figure, with a caption, discussed in the text.
-- The introduction gives the motivating problem, what the reader will learn, the
-  assumed background, and a roadmap of the sections. The summary introduces
-  nothing new.
-- Never mention item ids, drafts, seeds, videos, or this process in the text.
-- Keep the storyline in view: make clear how this section moves it forward.
+FOR THIS SECTION
+- Explain the plan entries listed for this section, each at its level,
+  following the section's plan. The source material is there to draw on: use
+  what serves the plan; you do not have to use all of it.
+- Where the material is thin or rushed on an important point, supply the
+  missing setup and steps yourself.
+- Connect to the neighbouring sections in whatever way fits; do not re-teach
+  earlier sections or cover later ones.
+- Use the notation and the citation keys given. Include and discuss the
+  assigned figures.
+- The introduction gives the motivating problem, what the reader will learn,
+  the assumed background, a short overview of the field, and a roadmap. The
+  summary introduces nothing new.
+- Never mention drafts, sources, videos, ids, or this process in the text.
 
 {LATEX_RULES}
 
@@ -827,8 +769,9 @@ Notation (use exactly):
 This section:
 {spec}
 
-Items this section must cover (at the depth their role warrants):
-{items or "(none — see the plan)"}
+Notes from the sources for this section (key equations, numbers, examples —
+use what serves the plan):
+{items or "(none)"}
 
 Figures for this section (attached as images; use these exact file names):
 {figure_lines or "(none)"}
@@ -862,36 +805,24 @@ def review_system(ground: bool, guide: str | None = None) -> str:
     return f"""
 You are a demanding reviewer reading one section of a tutorial as its intended
 reader would: technically mature, but new to this topic. You get the section,
-its specification from the outline, the items it must cover, and the outline of
+its specification (the plan entries it covers, with their levels), and a map of
 the whole tutorial.
 
 {TUTORIAL_STANDARD}
 
-Check, and report precisely:
-1. Coverage: every assigned item is present at the depth its role warrants
-   (core items fully developed; supporting items compact but with the why and
-   the how). List each missing or under-explained item id and what is missing.
-2. Rigor: logical jumps, skipped derivation steps, symbols or terms used before
-   being defined, methods introduced without motivation, unjustified claims,
-   and factual errors. {research}
-3. Flow: does it follow naturally from the previous section and fit the
-   storyline, in a sensible internal order? Does it re-teach earlier material or
-   depend on something not yet covered? Flag openings, transitions, or closings
-   that feel forced or templated in this context (e.g. a closing question or
-   recap that adds nothing) — not ones that genuinely help the reader.
-4. Depth and length, in both directions. Under: an important idea explained
-   more briefly than the reader needs (say exactly what to add). Over: proofs of
-   theorems, exhaustive enumerations, tangents, repetition, extras (examples,
-   algorithm boxes, cost analyses) that add little, minor variants developed
-   like core methods, or a section well above its target length (say exactly
-   what to cut). Judge by what the reader needs, not by what the sources
-   happened to cover. The target is a cap: if you ask for additions, say what
-   to cut so the section stays within it.
-5. Figures: every assigned figure included, captioned, and discussed.
-Read it as the intended reader: could they follow every paragraph with only
-what came before, without other material?
-For every issue say where it is and exactly how to fix it. Approve only if
-nothing is missing and no substantive issue remains.{brief_block(guide)}
+Report, precisely:
+1. Coverage: is each plan entry of this section explained at its level? For
+   each that is not, name it and say what is missing.
+2. Clarity: places a reader cannot follow — logical jumps, a term or symbol
+   used before it is explained, a passage that is too dense to follow. Say how
+   to fix each; if the fix needs more space than the target allows, say what
+   to remove instead.
+3. Correctness: factual errors. {research}
+4. Flow: fit with the previous section and the storyline; re-teaching earlier
+   material or covering later material; transitions that feel forced.
+5. Length: the section's length against its target (given). If it is well
+   over, say which pieces to remove entirely.
+Approve only if nothing is missing and no substantive issue remains.{brief_block(guide)}
 """.strip()
 
 
@@ -899,12 +830,12 @@ REVIEW_SCHEMA = {
     "type": "object",
     "properties": {
         "approved": {"type": "boolean"},
-        "missing_items": {
+        "missing": {
             "type": "array",
             "items": {
                 "type": "object",
-                "properties": {"id": {"type": "string"}, "what_is_missing": {"type": "string"}},
-                "required": ["id", "what_is_missing"],
+                "properties": {"entry": {"type": "string"}, "what_is_missing": {"type": "string"}},
+                "required": ["entry", "what_is_missing"],
             },
         },
         "issues": {
@@ -920,22 +851,19 @@ REVIEW_SCHEMA = {
             },
         },
     },
-    "required": ["approved", "missing_items", "issues"],
+    "required": ["approved", "missing", "issues"],
 }
 
 
-def review_user(*, overview: str, spec: str, items: str, section: str, checks: str, length: str) -> str:
+def review_user(*, overview: str, spec: str, section: str, checks: str, length: str) -> str:
     return f"""
-Outline of the whole tutorial (the reviewed section is marked >>>):
+Map of the whole tutorial (the reviewed section is marked >>>):
 {overview}
 
 Section specification:
 {spec}
 
 Length: {length}
-
-Items it must cover (at the depth their role warrants):
-{items or "(none — see the plan)"}
 {f"{chr(10)}Automatic checks already found:{chr(10)}{checks}{chr(10)}" if checks else ""}
 Section to review:
 ==================================================
@@ -946,12 +874,11 @@ Section to review:
 
 def revise_system(ground: bool, guide: str | None = None) -> str:
     return f"""
-You are revising one section of a tutorial to resolve every point of a review.
-Fix each listed problem and add each missing item at the depth its role
-warrants, using the draft material. Keep everything else that is correct. When
-the review asks you to shorten, cut what teaches least — proofs, tangents,
-repetition, extras that add little — and keep the key derivations and every
-assigned item at its depth.
+You are revising one section of a tutorial to resolve every point of a review:
+add what is missing at its level, using the source material, and fix each
+problem. Keep everything else that is correct. When something has to go to
+respect the target length, remove whole pieces of least importance — never
+compress the explanations you keep into fewer words.
 
 {TUTORIAL_STANDARD}
 
@@ -1000,12 +927,15 @@ Look for:
    elsewhere replace it with a short reference back.
 2. Inconsistency: notation, symbols, terminology, conventions (signs,
    indexing, normalization), or numbers that differ between sections.
-3. Order: something used before it is introduced, or "as we saw" referring to
-   material that has not appeared yet or appears only later.
+3. Order: a term, concept, or method used before it is explained (including
+   hardware and systems terms), or "as we saw" referring to material that has
+   not appeared yet.
 4. Transitions: a section's opening that does not fit what the previous section
    actually says, or a connection that feels forced or templated in context.
-5. Balance: comparable ideas treated at very different depth, an important
-   idea thin compared with its role, or a minor one inflated far beyond it.
+5. Balance and readability: comparable ideas treated at very different depth,
+   an important idea thin compared with its role, a minor one inflated, or a
+   passage too dense to follow (the fix is to remove less important material,
+   not to compress).
 6. Contradictions between sections, and gaps in the storyline (a step the
    reader needs that no section provides).
 Report only real problems that matter to the reader. For each, give the number
@@ -1091,7 +1021,7 @@ exact set of \cite keys it uses and the text around each citation. Produce a
 real, correct reference list, grounded in the sources — not guessed.
 
 Rules:
-- Use the research tools (arxiv_search / web_search / fetch_url) to find the
+- Use the research tools (paper_search, arxiv_search, web_search, fetch_url) to find the
   correct title, authors, venue/year, and arXiv id or DOI/URL for each work.
 - Output ONLY a LaTeX thebibliography environment, with exactly one \bibitem for
   each key you were given (same key, so \cite resolves). Do not add or drop keys.

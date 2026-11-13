@@ -12,6 +12,18 @@ from vitex.pipeline import Pipeline
 from vitex.utils import log, setup_logging
 
 
+def _section_list(text: str) -> list[int]:
+    """'2,5' or '3-4' or '1,3-5' -> sorted section numbers."""
+    numbers: set[int] = set()
+    try:
+        for part in text.split(","):
+            lo, _, hi = part.strip().partition("-")
+            numbers.update(range(int(lo), int(hi or lo) + 1))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected e.g. '2,5' or '3-4', got {text!r}") from exc
+    return sorted(numbers)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="vitex",
@@ -62,6 +74,12 @@ def _build_parser() -> argparse.ArgumentParser:
     feedback.add_argument("--plan-feedback", help="Revise the current plan following these notes.")
     feedback.add_argument("--plan-feedback-file", type=Path, help="Read plan feedback from a file.")
     run.add_argument("--replan", action="store_true", help="Make a fresh plan instead of reusing the saved one.")
+    run.add_argument(
+        "--sections",
+        type=_section_list,
+        help="Write only these sections as a sample, e.g. '2,5' or '3-4' "
+        "(after the plan and outline; output <name>_sample.pdf; reused by the full run).",
+    )
     guide = run.add_mutually_exclusive_group()
     guide.add_argument(
         "--guide",
@@ -191,6 +209,7 @@ def _config_from_args(args: argparse.Namespace) -> Config:
         cfg.ground = args.ground
     cfg.force = args.force
     cfg.plan_only = args.plan_only
+    cfg.sections = args.sections
     cfg.replan = args.replan
     cfg.verbose = args.verbose
     cfg.__post_init__()  # re-coerce Path fields after overrides

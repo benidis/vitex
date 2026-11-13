@@ -21,25 +21,20 @@ summary, and not a literature overview of every method that exists**. A reader
 with general technical maturity but no knowledge of the topic must understand
 everything that is included, front to back, without other material:
 
-- **Problem first**, then **intuition, then formalism**, with every symbol
-  defined at first use and nothing introduced before the reader needs it.
-- **Derivations scoped to the method** — the objective, gradient, update rule,
-  and key identities a method relies on are derived step by step; general
-  background math is assumed or stated in a line; theorems are stated with
-  their intuition and cited, not proved (unless the proof shows how the method
-  works).
-- **Depth by level in the plan** — *main line*: full treatment; *stepping
-  stones*: compact but proper (the problem they fix, the idea, the key
-  equations and what changes, how they are used, the trade-off); *mentions*: a
-  few sentences in context. Whatever is included is treated properly at its
-  level; a source's length never inflates a minor point.
-- **Extras where they teach** — algorithm boxes for main-line methods, cost
-  analyses where cost drives the story, worked examples where a mechanism is
-  not obvious, comparison tables for variants.
-- **Flow and economy** — one continuous, well-structured text, built up from
-  easier to harder; openings, transitions, and closings fit each section, never
-  a template; no proofs that add nothing, tangents, repetition, or exhaustive
-  lists.
+- **Problem first** — each idea is introduced through the problem it solves,
+  then the intuition, then the math.
+- **Explain, don't compress** — written at the pace of a good textbook; every
+  term (including hardware and systems terms) explained when it first appears;
+  the derivations that explain a method shown step by step; theorems stated and
+  cited, not proved.
+- **Depth follows the plan** — *main line*: full treatment (and, where they
+  teach, the algorithm as run, a cost analysis, a worked example); *stepping
+  stones*: compact but proper; *mentions*: a few sentences in context.
+- **Fit by choosing, never by squeezing** — when a section is over its length,
+  the least important material is removed entirely; what stays is fully
+  explained.
+- **Flow** — one continuous text, built up from easier to harder, with
+  transitions that fit each section rather than a template.
 - **Nothing wider than the page** — long equations are split, tables fit the
   text width, and a layout check fixes any overflow after compiling.
 
@@ -73,9 +68,10 @@ least necessary entries), never by squeezing main-line methods. The plan is
 shown before anything is written, and you can change it.
 
 **Lengths follow the plan.** Section targets come from the pages the plan gives
-each entry (figures, tables, and algorithm boxes count against them). Writers
-treat the target as a cap; a first version well over it is condensed before
-review; reviews flag over- and under-length; the editor sees every length.
+each entry (figures, tables, and algorithm boxes count against them). Whenever a
+section ends up more than 15% over — after the first version, after any
+revision, and once more on the final text — the least important material is
+removed (never compressed) until it fits.
 
 **Holistic view.** Every writer gets a map of the whole tutorial (each section's
 purpose and the content it covers) and the plans of its neighbours. After
@@ -83,11 +79,11 @@ writing, an editor reads the whole assembled tutorial for repetition,
 inconsistency, order, transitions, balance, contradictions, and storyline gaps,
 and the affected sections are revised.
 
-**Nothing is lost silently.** Every item of content is placed in a section or
-omitted with a recorded reason (its topic is excluded by the plan, or it is
-tangential). Every model output is validated and retried; if it still fails the
-run **stops** rather than skipping content, and re-running resumes from the
-cache. Revisions and LaTeX repairs that delete content are rejected.
+**Coverage is checked against the plan.** Reviews check that every plan entry
+of a section is explained at its level and is clear; the sources' material is
+there to draw on, not a checklist. Every model output is validated and retried;
+if it still fails the run **stops** rather than skipping content, and re-running
+resumes from the cache. LaTeX repairs that delete content are rejected.
 
 ### Frames
 
@@ -102,7 +98,7 @@ content.
 ### Research
 
 The survey, plan, drafts, outline, sections, reviews, and bibliography can call
-keyless research tools — arXiv search, DuckDuckGo web search, page fetching —
+keyless research tools — OpenAlex paper search (with venues and citation counts), arXiv search, DuckDuckGo web search, page fetching —
 up to `--research-iterations` rounds per pass, to verify claims and find
 primary sources, cited with `\cite{...}`. `fetch_url` only reaches public
 http(s) hosts.
@@ -171,6 +167,18 @@ vitex run URL --doc old.tex --name modern_rl --guide-file brief.md --pages 70 --
 # 2. review/change the plan (see below), then write the tutorial from it
 vitex run URL --doc old.tex --name modern_rl --guide-file brief.md --plan work/runs/modern_rl/plan.md
 ```
+
+### Try a few sections first
+
+```bash
+vitex run ... --name modern_rl --plan work/runs/modern_rl/plan.md --sections 2,5
+#    -> output/modern_rl/modern_rl_sample.pdf
+```
+
+`--sections` writes only those sections (numbered as in the outline printed
+in the log) after the plan and outline, so you can judge the writing in minutes
+before paying for the whole tutorial. They are cached; the full run (without
+`--sections`) reuses them.
 
 `--plan FILE` uses exactly that file — the saved `plan.md`, an edited copy kept
 anywhere, or another tutorial's plan adapted for this one. Without `--plan`, a
@@ -270,6 +278,7 @@ Precedence: built-in defaults → `.env`/environment → CLI flags.
 | `--plan FILE` | — | write the tutorial from exactly this plan |
 | `--plan-feedback` / `--plan-feedback-file` | — | revise the current plan with notes |
 | `--replan` | — | make a fresh plan instead of reusing the saved one |
+| `--sections 2,5` | — | write only these sections as a sample (`<name>_sample.pdf`) |
 | `--provider` | `VITEX_PROVIDER` | `bedrock` (default) or `anthropic` |
 | — | `VITEX_AWS_PROFILE` | `~/.aws` profile for all AWS calls; **required** for Bedrock / Transcribe |
 | `--aws-region` | `AWS_REGION` | region for Bedrock / Transcribe |

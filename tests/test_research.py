@@ -30,3 +30,21 @@ def test_dispatch_bad_arguments_is_non_fatal():
 def test_tool_specs_cover_dispatch_table():
     spec_names = {t["name"] for t in research.TOOL_SPECS}
     assert spec_names == set(research._DISPATCH)
+
+
+def test_paper_search_parses_openalex_with_quality_signals(monkeypatch):
+    import json
+
+    payload = {"results": [{
+        "display_name": "ZeRO: Memory optimizations Toward Training Trillion Parameter Models",
+        "publication_year": 2020, "cited_by_count": 1433, "doi": "https://doi.org/10.1109/sc41405.2020.00024",
+        "primary_location": {"source": {"display_name": "SC20"}},
+        "locations": [{"landing_page_url": "https://arxiv.org/abs/1910.02054v3"}],
+        "authorships": [{"author": {"display_name": f"A{i}"}} for i in range(12)],
+        "abstract_inverted_index": {"Large": [0], "models": [1]},
+    }]}
+    monkeypatch.setattr(research, "_get", lambda url, **kw: json.dumps(payload))
+    [hit] = json.loads(research.paper_search("zero"))
+    assert (hit["venue"], hit["citations"], hit["arxiv_id"]) == ("SC20", 1433, "1910.02054")
+    assert hit["abstract"] == "Large models" and len(hit["authors"]) == 9  # 8 + "... (12 authors)"
+    assert "paper_search" in research._DISPATCH and research.TOOL_SPECS[0]["name"] == "paper_search"

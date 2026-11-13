@@ -273,3 +273,13 @@ def test_plan_entries_below_their_level_minimum_are_demoted():
     assert [(e.name, e.level) for e in entries] == [
         ("PPO", "main"), ("REINFORCE", "stepping"), ("Dueling", "mention"), ("Double DQN", "stepping")]
     assert len(changes) == 2
+
+
+def test_sample_run_writes_only_the_chosen_sections(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_mod, "ClaudeClient", ScriptedModel)
+    result = Pipeline(_doc_cfg(tmp_path, name="attn", sections=[2])).run()
+    tex = result.tex_path.read_text()
+    assert result.tex_path == tmp_path / "out" / "attn" / "attn_sample.tex"
+    assert tex.count("\\section{") == 1 and "\\section{Core}" in tex and "(sample: sections 2)" in tex
+    assert (tmp_path / "work" / "runs" / "attn" / "coverage.sample.json").exists()
+    assert not (tmp_path / "work" / "runs" / "attn" / "editorial.json").exists()  # no editor on a sample

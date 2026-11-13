@@ -7,7 +7,9 @@ a formula, a definition, or a citation.
 Everything here uses only the standard library over plain HTTPS, so there are no
 API keys and no compiled dependencies to install:
 
-  * ``arxiv_search``  -> the arXiv Atom API (ideal for ML / math papers)
+  * ``paper_search``  -> OpenAlex: papers with venue, year, and citation count,
+                         so established work can be told from niche preprints
+  * ``arxiv_search``  -> the arXiv Atom API (newest ML / math preprints)
   * ``web_search``    -> the DuckDuckGo HTML endpoint (general coverage)
   * ``fetch_url``     -> fetch a page and return readable text
 
@@ -148,6 +150,63 @@ def arxiv_search(query: str, max_results: int = 5) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Paper search with quality signals (OpenAlex, keyless)
+# ---------------------------------------------------------------------------
+
+_ARXIV_ID_RE = re.compile(r"arxiv\.org/(?:abs|pdf)/([\w.\-/]+?)(?:v\d+)?(?:\.pdf)?$")
+
+
+def _abstract(inverted: dict | None, limit: int = 600) -> str:
+    """OpenAlex stores abstracts as {word: [positions]}; rebuild the text."""
+    if not inverted:
+        return ""
+    words = sorted((pos, word) for word, positions in inverted.items() for pos in positions)
+    text = " ".join(w for _, w in words)
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def paper_search(query: str, max_results: int = 5) -> str:
+    """Search OpenAlex; return title, year, venue, citation count, ids, authors."""
+    q = urllib.parse.urlencode(
+        {
+            "search": query,
+            "per-page": max(1, min(max_results, 10)),
+            "select": "display_name,publication_year,cited_by_count,primary_location,locations,doi,authorships,abstract_inverted_index",
+        }
+    )
+    try:
+        data = json.loads(_get(f"https://api.openalex.org/works?{q}"))
+    except Exception as exc:  # noqa: BLE001 - non-fatal; arXiv still available
+        return f"paper_search unavailable ({exc}); try arxiv_search instead."
+    hits = []
+    for w in data.get("results", []):
+        venue = ((w.get("primary_location") or {}).get("source") or {}).get("display_name") or ""
+        arxiv = ""
+        for loc in w.get("locations") or []:
+            if m := _ARXIV_ID_RE.search((loc or {}).get("landing_page_url") or ""):
+                arxiv = m.group(1)
+                break
+        authors = [((a.get("author") or {}).get("display_name") or "") for a in w.get("authorships") or []]
+        if len(authors) > _MAX_AUTHORS:
+            authors = authors[:_MAX_AUTHORS] + [f"... ({len(authors)} authors)"]
+        hits.append(
+            {
+                "title": w.get("display_name", ""),
+                "year": w.get("publication_year"),
+                "venue": venue,
+                "citations": w.get("cited_by_count", 0),
+                "arxiv_id": arxiv,
+                "doi": w.get("doi") or "",
+                "authors": authors,
+                "abstract": _abstract(w.get("abstract_inverted_index")),
+            }
+        )
+    if not hits:
+        return f"No papers found for {query!r}."
+    return json.dumps(hits, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
 # General web search (DuckDuckGo HTML endpoint, keyless)
 # ---------------------------------------------------------------------------
 
@@ -223,11 +282,26 @@ def fetch_url(url: str, max_chars: int = 6000) -> str:
 
 TOOL_SPECS = [
     {
+        "name": "paper_search",
+        "description": (
+            "Search published papers (OpenAlex) with their venue, year, and citation "
+            "count, to find the primary source of an idea and to tell established, "
+            "widely cited work from niche preprints. Prefer this for citations."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search terms, e.g. a paper title."},
+                "max_results": {"type": "integer", "description": "1-10 (default 5)."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "arxiv_search",
         "description": (
-            "Search arXiv for papers to ground a claim or find the correct "
-            "citation (title, authors, year, arXiv id, abstract). Prefer this "
-            "for ML, math, and CS topics."
+            "Search arXiv (title, authors, year, arXiv id, abstract). Use it for the "
+            "newest ML, math, and CS preprints that paper_search may not index yet."
         ),
         "input_schema": {
             "type": "object",
@@ -268,6 +342,7 @@ TOOL_SPECS = [
 ]
 
 _DISPATCH: dict[str, Callable[..., str]] = {
+    "paper_search": paper_search,
     "arxiv_search": arxiv_search,
     "web_search": web_search,
     "fetch_url": fetch_url,

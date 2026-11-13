@@ -40,6 +40,9 @@ class Config:
     # after planning; revise the plan with feedback; force a fresh plan.
     plan_path: Path | None = None
     plan_only: bool = False
+    # Write only these sections (1-based, after the plan and outline) as a
+    # sample to judge the writing before the full run.
+    sections: list[int] | None = None
     plan_feedback: str | None = None
     replan: bool = False
     # Author's brief: free-text steering applied to every writing pass (scope,

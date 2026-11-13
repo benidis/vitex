@@ -206,8 +206,8 @@ def test_flow_rules_do_not_mandate_a_closing_question():
 
     for text in (TUTORIAL_STANDARD, section_system(True), review_system(True)):
         assert "leads_to" not in text and "what problem remains" not in text
-    assert "none is required" in TUTORIAL_STANDARD
-    assert "genuinely help" in review_system(True)
+    assert "there are no templates" in TUTORIAL_STANDARD
+    assert "transitions that feel forced" in review_system(True)
 
 
 class EditorClient:
@@ -323,7 +323,7 @@ def test_over_long_first_version_is_condensed_before_review(tmp_path):
             self.condense_requests = 0
 
         def complete(self, *, text, **kw):
-            if "Condense it to about" in text:
+            if "by REMOVING whole pieces" in text:
                 self.condense_requests += 1
                 return f"\\section{{Body}}\n{'tight ' * 450}\n{SECTION_END}"
             return f"\\section{{Body}}\n{'wordy ' * 1500}\n{SECTION_END}"
@@ -341,3 +341,23 @@ def test_over_long_first_version_is_condensed_before_review(tmp_path):
     [section] = write_sections(client, jobs, {}, Config(name="t", workdir=tmp_path, ground=False, review_rounds=1))
     assert client.condense_requests == 1 and "tight" in section and "wordy" not in section
     assert effective_words("\\begin{figure}x\\end{figure} a b") == 150 + 3
+
+
+def test_review_coverage_is_by_plan_entry_and_notes_are_material():
+    from vitex.llm.prompts import REVIEW_SCHEMA, section_system
+
+    assert "missing" in REVIEW_SCHEMA["properties"] and "missing_items" not in REVIEW_SCHEMA["properties"]
+    outline = Outline(title="T", reader_background="b", notation=[], sections=[_sec("PPO", "core", ["I1.01"])])
+    outline.sections[0].topics = ["PPO"]
+    units = [SeedUnit(id="u1", kind="video", source_title="V", position="p", text="t")]
+    [job] = section_jobs(outline, _items(), {"u1": "draft"}, units, {}, {"PPO": "main"})
+    assert "Plan entries covered here: PPO (main)" in job.spec
+    assert "I1.01" not in job.request  # item ids are routing, not requirements shown to the writer
+    assert "use what serves the plan" in job.request
+    assert "you do not have to use all of it" in section_system(True)
+
+
+def test_cli_parses_section_lists():
+    from vitex.cli import _section_list
+
+    assert _section_list("2,5") == [2, 5] and _section_list("1,3-5") == [1, 3, 4, 5]

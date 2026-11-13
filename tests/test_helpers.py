@@ -33,7 +33,7 @@ def test_tex_escape_and_preamble_title():
 
 def test_draft_prompts_carry_the_tutorial_standard_and_seed_rules():
     system = draft_system(ground=True)
-    assert "not a summary" in system and "SEEDS" in system and "arxiv_search" in system
+    assert "not a summary" in system and "THE SOURCES" in system and "arxiv_search" in system
     assert "arxiv_search" not in draft_system(ground=False)
     user = draft_user(kind="document", source_title="Notes", position="part 1 of 2",
                       text="BODY", figure_lines="", visual_notes="", target_words=1200)
@@ -63,7 +63,8 @@ def test_authors_brief_reaches_every_writing_prompt():
     assert brief in plan_system(brief)
     text = section_system(True)
     flat = " ".join(text.split())
-    assert "Depth follows the idea's LEVEL" in flat and "do not prove them unless" in flat
+    assert "Explain, don't compress" in flat and "Fit by choosing, never by squeezing" in flat
+    assert "rather than proving them" in flat
     assert "Length is never a concern" not in text
 
 

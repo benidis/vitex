@@ -56,6 +56,7 @@ from vitex.reconstruct import (
     document_units,
     draft_seeds,
     edit_tutorial,
+    fit_lengths,
     section_jobs,
     video_units,
     write_sections,
@@ -212,17 +213,32 @@ class Pipeline:
             client, units, items, summaries, list(figures.values()), cfg, budget,
             plan.to_markdown(), entries, round(plan.frame_pages() * WORDS_PER_PAGE),
         )
-        jobs = section_jobs(outline, items, drafts, units, figures)
-        sections = write_sections(client, jobs, figures, cfg)
-        # Holistic pass: an editor reads the whole tutorial and the sections with
-        # cross-section problems are revised.
-        sections = edit_tutorial(client, outline, items, sections, jobs, cfg)
-
+        jobs = section_jobs(outline, items, drafts, units, figures, {e.name: e.level for e in plan.entries})
         title = cfg.title or plan.title or outline.title or titles[0]
         stem = cfg.name
+        if cfg.sections:
+            # Sample: write only the chosen sections, to judge the writing
+            # before paying for the whole tutorial. They are cached, so the
+            # full run reuses them.
+            bad = [n for n in cfg.sections if not 1 <= n <= len(jobs)]
+            if bad:
+                raise ValueError(f"--sections {bad} out of range: the outline has {len(jobs)} sections")
+            jobs = [j for j in jobs if j.idx + 1 in cfg.sections]
+            log.info("Sample: writing sections %s of %d", ", ".join(str(j.idx + 1) for j in jobs), len(outline.sections))
+            sections = write_sections(client, jobs, figures, cfg, report_name="coverage.sample.json")
+            stem = f"{cfg.name}_sample"
+            title = f"{title} (sample: sections {', '.join(str(j.idx + 1) for j in jobs)})"
+        else:
+            sections = write_sections(client, jobs, figures, cfg)
+            # Holistic pass: an editor reads the whole tutorial and the sections
+            # with cross-section problems are revised.
+            sections = edit_tutorial(client, outline, items, sections, jobs, cfg)
+        # Final length pass: whatever reviews and edits added is brought back to
+        # the plan's targets by removing material, not compressing it.
+        sections = fit_lengths(client, cfg, jobs, sections)
         # Each tutorial gets its own directory under outdir so several can
         # coexist without their .tex/.pdf/figures colliding.
-        doc_dir = cfg.outdir / stem
+        doc_dir = cfg.outdir / cfg.name
         doc_dir.mkdir(parents=True, exist_ok=True)
         document = assemble_document(build_preamble(title), sections)
 
