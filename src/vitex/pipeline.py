@@ -8,22 +8,18 @@ run that dies midway resumes without redoing finished work, while a changed
 setting, prompt, or source regenerates exactly the stages it affects.
 
 Stages:
-  per video (work/<source-slug>/):
-    1. resolve source (download or local)        -> video + metadata
-    2. extract audio                              -> audio.wav
-    3. transcribe                                 -> transcript.json
-    4. one frame per distinct visual state        -> frames.json (+ images)
-    5. vision triage of every frame               -> triage.json
-  per document (work/<doc-slug>/): load text, carry over figures
-  then, across all seeds:
-    6. split into seed units; draft each (fact-checked)  -> work/drafts/<unit>.tex
-    7. inventory every item of content                   -> work/drafts/<unit>.items.json
-    7b. survey the topic and its literature; size budget  -> work/tutorial/survey.json
-    8. outline placing every item                        -> work/tutorial/outline.json
-    9. write + review + revise each section (parallel)   -> work/tutorial/sections/
-   10. editor reads the whole; fix flagged sections      -> work/tutorial/editorial/
-   11. resolve \\cite keys into a bibliography            -> work/tutorial/bibliography_*.tex
-   12. stage figures, write .tex, build PDF              -> output/<stem>/<stem>.{tex,pdf}
+  per video (work/sources/<slug>/): download, audio, transcript, distinct
+    frames, vision triage; per document (work/sources/<slug>/): text + figures
+  then, for the tutorial (work/runs/<name>/):
+    1. seed units (video chunks, document parts)
+    2. survey the topic and its literature            -> survey.json
+    3. plan the scope (levels, pages, reasons)        -> plan.md   (--plan-only stops)
+    4. draft each unit, scoped by the plan (parallel) -> drafts/<unit>.tex
+    5. inventory every item of content                -> drafts/<unit>.items.json
+    6. outline following the plan                     -> outline.json
+    7. write + review + revise each section           -> sections/, coverage.json
+    8. editor reads the whole; fix flagged sections   -> editorial/, editorial.json
+    9. bibliography; compile; layout check            -> output/<name>/<name>.{tex,pdf}
 """
 
 from __future__ import annotations
@@ -64,7 +60,8 @@ from vitex.reconstruct import (
     video_units,
     write_sections,
 )
-from vitex.reconstruct.survey import WORDS_PER_PAGE
+from vitex.reconstruct.outline import WORDS_PER_PAGE
+from vitex.reconstruct.plan import resolve_plan
 from vitex.transcribe import build_transcriber
 from vitex.utils import fingerprint, read_cached, require_tool, safe_stem, write_cached
 
@@ -73,9 +70,10 @@ log = logging.getLogger("vitex")
 
 @dataclass
 class Result:
-    tex_path: Path
+    tex_path: Path | None  # None for --plan-only
     pdf_path: Path | None
     stem: str
+    plan_path: Path | None = None
 
 
 class Pipeline:
@@ -106,6 +104,11 @@ class Pipeline:
         cached = read_cached(cache, key, force)
         if cached is not None:
             frames = [Frame.from_dict(d) for d in json.loads(cached)]
+            # Paths are stored as written; after the source dir moved, find the
+            # frames by name in its current location.
+            for f in frames:
+                if not f.path.exists():
+                    f.path = info.workdir / "frames" / f.path.name
             if all(f.path.exists() for f in frames):
                 log.info("Frames: cached (%d)", len(frames))
                 return frames
@@ -131,7 +134,7 @@ class Pipeline:
     def _video(self, source: str, client: ClaudeClient) -> tuple[SourceInfo, list[SeedUnit], list[Figure]]:
         """Prepare one video and return its seed units and attached figures."""
         cfg = self.cfg
-        info = resolve_source(source, cfg.workdir, cfg.force)
+        info = resolve_source(source, cfg.sources_dir, cfg.force)
         force = cfg.force
         if info.changed and not force:
             # This dir holds artifacts from a different source; all are stale.
@@ -154,6 +157,7 @@ class Pipeline:
         cfg.workdir.mkdir(parents=True, exist_ok=True)
         cfg.outdir.mkdir(parents=True, exist_ok=True)
         client = ClaudeClient(cfg)
+        client.check_access()
         try:
             return self._run(client)
         finally:
@@ -174,25 +178,39 @@ class Pipeline:
             figures.update((f.name, f) for f in video_figs)
             titles.append(info.title)
         for path in cfg.docs:
-            doc = load_document(path, cfg.workdir)
+            doc = load_document(path, cfg.sources_dir)
             doc_seeds = document_units(doc, cfg)
             units += doc_seeds
             figures.update((f.name, f) for f in doc.figures)
             titles.append(doc.title)
         log.info("Seeds: %d unit(s) from %d source(s); %d candidate figures", len(units), len(titles), len(figures))
 
-        drafts = draft_seeds(client, units, cfg)
+        # The run's identity: work/runs/<name>/ and output/<name>/.
+        if not cfg.name:
+            cfg.name = safe_stem(cfg.title or titles[0])
+        cfg.run_dir.mkdir(parents=True, exist_ok=True)
+        self._log_to_file(cfg.run_dir / "run.log")
+        log.info("Run: %s (work in %s)", cfg.name, cfg.run_dir)
+
+        # Scope first: survey the topic, then decide what the tutorial includes,
+        # at what level, and why. --plan-only stops here.
+        survey = build_survey(client, units, cfg)
+        plan = resolve_plan(client, survey, cfg, [u.id for u in units])
+        plan_file = cfg.plan_path or cfg.run_dir / "plan.md"
+        if cfg.plan_only:
+            log.info("Plan only: review or edit %s, then run again without --plan-only "
+                     "(or with --plan FILE, or --plan-feedback \"...\").", plan_file)
+            return Result(tex_path=None, pdf_path=None, stem=cfg.name, plan_path=plan_file)
+
+        drafts = draft_seeds(client, units, cfg, plan.scope_text())
         items, summaries = build_inventory(client, units, drafts, cfg)
-        log.info("Inventory: %d content items to place", len(items))
-        # Survey the topic itself: which methods matter, and which the seeds miss.
-        survey = build_survey(client, units, items, summaries, cfg)
-        # Length budget from the distinct topics and their roles (not from the
-        # amount of source material); --pages overrides it.
-        budget = cfg.pages * WORDS_PER_PAGE if cfg.pages else survey.budget()
-        log.info("Length budget: %d words (~%d pages)%s", budget, budget // WORDS_PER_PAGE,
-                 " from --pages" if cfg.pages else " from the survey's topics")
+        log.info("Inventory: %d content items", len(items))
+        budget = round(plan.budget_pages * WORDS_PER_PAGE)
+        log.info("Length budget: %d words (%.0f pages, from the plan)", budget, plan.budget_pages)
+        entries = [{"name": e.name, "level": e.level, "pages": e.pages} for e in plan.entries]
         outline = build_outline(
-            client, units, items, summaries, list(figures.values()), cfg, budget, survey.landscape(), survey.topics
+            client, units, items, summaries, list(figures.values()), cfg, budget,
+            plan.to_markdown(), entries, round(plan.frame_pages() * WORDS_PER_PAGE),
         )
         jobs = section_jobs(outline, items, drafts, units, figures)
         sections = write_sections(client, jobs, figures, cfg)
@@ -200,8 +218,8 @@ class Pipeline:
         # cross-section problems are revised.
         sections = edit_tutorial(client, outline, items, sections, jobs, cfg)
 
-        title = cfg.title or outline.title or (titles[0] if len(titles) == 1 else "Tutorial")
-        stem = safe_stem(cfg.name or title)
+        title = cfg.title or plan.title or outline.title or titles[0]
+        stem = cfg.name
         # Each tutorial gets its own directory under outdir so several can
         # coexist without their .tex/.pdf/figures colliding.
         doc_dir = cfg.outdir / stem
@@ -233,4 +251,14 @@ class Pipeline:
         else:
             write_document(document, doc_dir, stem)
 
-        return Result(tex_path=tex_path, pdf_path=pdf_path, stem=stem)
+        return Result(tex_path=tex_path, pdf_path=pdf_path, stem=stem, plan_path=plan_file)
+
+    @staticmethod
+    def _log_to_file(path: Path) -> None:
+        """Also write this run's log to ``path`` (appending across runs)."""
+        root = logging.getLogger("vitex")
+        if any(isinstance(h, logging.FileHandler) and Path(h.baseFilename) == path.resolve() for h in root.handlers):
+            return
+        handler = logging.FileHandler(path, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-7s %(message)s", "%Y-%m-%d %H:%M:%S"))
+        root.addHandler(handler)

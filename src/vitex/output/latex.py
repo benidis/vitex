@@ -32,7 +32,14 @@ _PREAMBLE_TEMPLATE = r"""
 \usepackage{listings}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
+\usepackage{tabularx}
 \usepackage[hidelinks]{hyperref}
+\usepackage{xurl}
+
+% Keep content inside the text width: let TeX stretch spacing before a line
+% overflows, and let long derivations break across pages.
+\setlength{\emergencystretch}{3em}
+\allowdisplaybreaks
 
 \graphicspath{{figures/}}
 

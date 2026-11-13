@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +43,18 @@ def _stale_cache(workdir: Path, identity: str) -> bool:
         return str(read_json(marker).get("identity")) != identity
     except Exception:
         return True
+
+
+def _source_dir(workroot: Path, slug: str) -> Path:
+    """``workroot/slug``, moving it there from the pre-``sources/`` layout
+    (``work/<slug>``) if needed, so nothing is downloaded or transcribed again."""
+    workdir = workroot / slug
+    legacy = workroot.parent / slug
+    if not workdir.exists() and legacy.is_dir():
+        workroot.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(legacy), str(workdir))
+        log.info("Moved %s -> %s (new work layout)", legacy, workdir)
+    return workdir
 
 
 def _clear_video(workdir: Path) -> None:
@@ -96,7 +109,7 @@ def _resolve_local(path: Path, workroot: Path) -> SourceInfo:
         raise DownloadError(f"Local source not found: {path}")
     identity = f"file:{path.resolve()}"
     slug = _slug("file", path.stem, identity)
-    workdir = workroot / slug
+    workdir = _source_dir(workroot, slug)
     changed = _stale_cache(workdir, identity)
     workdir.mkdir(parents=True, exist_ok=True)
     write_json(workdir / _SOURCE_MARKER, {"identity": identity, "path": str(path)})
@@ -134,7 +147,7 @@ def _resolve_url(url: str, workroot: Path, force: bool) -> SourceInfo:
     video_id = str(metadata.get("id") or "")
     identity = f"youtube:{video_id}" if video_id else f"url:{url}"
     slug = f"yt-{re.sub(r'[^A-Za-z0-9-]+', '-', video_id)}" if video_id else _slug("url", "", identity)
-    workdir = workroot / slug
+    workdir = _source_dir(workroot, slug)
     workdir.mkdir(parents=True, exist_ok=True)
     changed = _stale_cache(workdir, identity)
 

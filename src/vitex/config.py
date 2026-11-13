@@ -32,10 +32,16 @@ class Config:
     # of their content is carried into one fact-checked tutorial.
     sources: list[str] = field(default_factory=list)  # video URLs / paths
     docs: list[Path] = field(default_factory=list)  # document paths
-    title: str | None = None  # tutorial title; proposed by the outline if unset
-    # Name of the output directory and files (output/<name>/<name>.tex);
-    # defaults to the title made filesystem-safe.
+    title: str | None = None  # tutorial title; proposed by the plan if unset
+    # The tutorial's identity: its run dir (work/runs/<name>/) and output
+    # (output/<name>/<name>.tex). Defaults to the title, else the first source.
     name: str | None = None
+    # Planning: use exactly this plan file (step 2 of a two-step run); stop
+    # after planning; revise the plan with feedback; force a fresh plan.
+    plan_path: Path | None = None
+    plan_only: bool = False
+    plan_feedback: str | None = None
+    replan: bool = False
     # Author's brief: free-text steering applied to every writing pass (scope,
     # focus, emphasis, audience, special instructions).
     guide: str | None = None
@@ -128,6 +134,8 @@ class Config:
         self.workdir = Path(self.workdir)
         self.outdir = Path(self.outdir)
         self.docs = [Path(d) for d in self.docs]
+        if self.plan_path is not None:
+            self.plan_path = Path(self.plan_path)
 
     @property
     def uses_aws(self) -> bool:
@@ -142,9 +150,22 @@ class Config:
         return self.triage_model or self.model
 
     @property
+    def sources_dir(self) -> Path:
+        """Per-source artifacts (download, transcript, frames, triage), shared by
+        every tutorial that uses the source."""
+        return self.workdir / "sources"
+
+    @property
+    def run_dir(self) -> Path:
+        """Everything that belongs to one tutorial: plan, drafts, outline,
+        sections, reviews, editorial, bibliography, log."""
+        if not self.name:
+            raise ValueError("The run has no name yet (set --name or --title).")
+        return self.workdir / "runs" / self.name
+
+    @property
     def tutorial_dir(self) -> Path:
-        """Cache dir for the cross-source passes (outline, sections, bibliography)."""
-        return self.workdir / "tutorial"
+        return self.run_dir
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -201,3 +222,7 @@ class Config:
         for doc in self.docs:
             if not Path(doc).is_file():
                 raise ValueError(f"Document not found: {doc}")
+        if self.plan_path is not None and not self.plan_path.is_file():
+            raise ValueError(f"Plan file not found: {self.plan_path}")
+        if self.plan_path is not None and (self.plan_feedback or self.replan):
+            raise ValueError("--plan uses a plan as-is; it cannot be combined with --plan-feedback or --replan.")

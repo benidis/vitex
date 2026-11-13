@@ -113,3 +113,44 @@ def test_drop_silent_and_collapse_repeats():
 
     loop = [Segment(i, i + 1, "Thank you.") for i in range(5)] + [Segment(9, 10, "next")]
     assert [s.text for s in collapse_repeats(loop)] == ["Thank you.", "Thank you.", "next"]
+
+
+# --- layout (content wider than the text) -----------------------------------------
+
+
+def test_overflows_are_parsed_with_their_source_lines():
+    from vitex.output.build import overflow_excerpts, overflows
+
+    log = ("Overfull \\hbox (61.57pt too wide) in paragraph at lines 3--4\n"
+           "Overfull \\hbox (2.0pt too wide) in paragraph at lines 9--9\n"
+           "Overfull \\hbox (17.7pt too wide) detected at line 6\n")
+    found = overflows(log)
+    assert found == [(61.57, 3, 4), (17.7, 6, 6)]  # 2pt is below the tolerance
+    doc = "\n".join(f"line{i}" for i in range(1, 11))
+    text = overflow_excerpts(found, doc)
+    assert "62pt too wide at lines 3-4" in text and "     4| line4" in text
+
+
+def test_layout_fix_is_kept_only_when_it_reduces_overflows(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from vitex.config import Config
+    from vitex.output import build
+
+    def fake_compile(tex_path):
+        doc = tex_path.read_text()
+        lines = [f"Overfull \\hbox (40.0pt too wide) detected at line {i}"
+                 for i, ln in enumerate(doc.splitlines(), 1) if "WIDE" in ln]
+        tex_path.with_suffix(".log").write_text("\n".join(lines))
+        tex_path.with_suffix(".pdf").write_text("pdf")
+        return True, ""
+
+    monkeypatch.setattr(build, "_compile_once", fake_compile)
+    replies = iter([
+        "<<<<<<< SEARCH\nWIDE equation one\n=======\nbroken equation\none\n>>>>>>> REPLACE",
+    ])
+    client = SimpleNamespace(complete=lambda **kw: next(replies))
+    doc = "\\documentclass{article}\n\\begin{document}\n\\section{A}\nWIDE equation one\ntext\n\\end{document}\n"
+    tex = tmp_path / "t.tex"
+    pdf = build.build_pdf(client, doc, tex, Config(name="t"))
+    assert pdf.exists() and "WIDE" not in tex.read_text() and "broken equation" in tex.read_text()

@@ -1,12 +1,12 @@
 # vitex
 
-Build a complete, self-contained **LaTeX tutorial** (and PDF) from any number of
+Build a self-contained **LaTeX tutorial** (and PDF) from any number of
 **videos** and **documents**, using **Claude** (over Amazon Bedrock by default).
 
-The sources are **seeds**, not the product: everything of substance in every
-video and document is carried into one tutorial — fact-checked against the
-literature, corrected where wrong, and expanded — so the result is more
-complete, more detailed, and more correct than any single source. Typical uses:
+The sources are **seeds**, not the product. vitex first decides the tutorial's
+**scope** — which methods and topics it covers, at what level, and why — then
+writes it from the sources, fact-checked against the literature, corrected
+where wrong, and explained properly. Typical uses:
 
 - turn one or more lectures into a written tutorial;
 - improve an existing tutorial (`--doc`) with new lectures;
@@ -16,38 +16,32 @@ complete, more detailed, and more correct than any single source. Typical uses:
 ## What "tutorial" means here
 
 Every writing pass is held to one standard (`TUTORIAL_STANDARD` in
-[prompts.py](src/vitex/llm/prompts.py)): a tutorial, **not a summary, survey, or
-catalogue of methods**. A reader with general technical maturity (undergraduate
-linear algebra, calculus, probability, programming) but no knowledge of the
-topic must understand all of it, front to back, without other material:
+[prompts.py](src/vitex/llm/prompts.py)): a tutorial on its topic — **not a
+summary, and not a literature overview of every method that exists**. A reader
+with general technical maturity but no knowledge of the topic must understand
+everything that is included, front to back, without other material:
 
-- **Problem first** — every idea is introduced through the problem it solves,
-  set up fully (setting, givens, goal, assumptions, why the obvious fails).
-- **Intuition, then formalism** — then every symbol tied back to the intuition.
-- **No logical jumps** — the key results (objectives, gradients, update rules)
-  derived step by step; theorems are stated with their intuition and cited, not
-  proved.
-- **No assumed topic knowledge** — every term and symbol defined at first use.
-- **Nothing out of the blue** — a method appears only once the reader needs it.
-- **Flow** — one continuous, well-structured text: each part follows
-  naturally from what came before. How a section opens, connects, and closes
-  is decided by what fits it — its purpose and its neighbours; a motivating
-  question, signpost, or recap is used where it genuinely helps, never as a
-  template. One notation throughout.
-- **Depth by role, not by the source** — *core* ideas on the main line get the
-  full treatment; *supporting* ideas (variants, refinements, alternatives) a
-  compact but complete one (the problem they fix, the idea, the key equations,
-  how they are used, the trade-off); *brief* ones a few sentences or a table
-  row. A source's brevity never shortens a core idea, and its length never
-  inflates a minor one. Reviews flag both under- and over-explanation.
-- **Extras where they teach** — algorithm boxes (`algorithm`/`algpseudocode`)
-  for core methods, cost analyses where cost drives the story, worked examples
-  where a mechanism is not obvious, comparison tables for variants.
-- **Economy** — no proofs, tangents, repetition, or exhaustive enumerations.
-- **Build up** — easier before harder, concrete before abstract; the problem,
-  the natural first attempt and why it fails, then the better solution. The
-  outline fixes one storyline and orders material from all sources along it,
-  regardless of the order the sources used.
+- **Problem first**, then **intuition, then formalism**, with every symbol
+  defined at first use and nothing introduced before the reader needs it.
+- **Derivations scoped to the method** — the objective, gradient, update rule,
+  and key identities a method relies on are derived step by step; general
+  background math is assumed or stated in a line; theorems are stated with
+  their intuition and cited, not proved (unless the proof shows how the method
+  works).
+- **Depth by level in the plan** — *main line*: full treatment; *stepping
+  stones*: compact but proper (the problem they fix, the idea, the key
+  equations and what changes, how they are used, the trade-off); *mentions*: a
+  few sentences in context. Whatever is included is treated properly at its
+  level; a source's length never inflates a minor point.
+- **Extras where they teach** — algorithm boxes for main-line methods, cost
+  analyses where cost drives the story, worked examples where a mechanism is
+  not obvious, comparison tables for variants.
+- **Flow and economy** — one continuous, well-structured text, built up from
+  easier to harder; openings, transitions, and closings fit each section, never
+  a template; no proofs that add nothing, tangents, repetition, or exhaustive
+  lists.
+- **Nothing wider than the page** — long equations are split, tables fit the
+  text width, and a layout check fixes any overflow after compiling.
 
 ## How it works
 
@@ -56,82 +50,62 @@ videos ──► audio ──► transcript (faster-whisper | Amazon Transcribe)
    └──► frames: one per distinct visual state ──► vision triage (rate every frame)
 documents (.tex/.md/.txt/.pdf) ──► text + figures
                         │
-        seed units (8-minute video chunks, document parts)
-                        │
-   draft        each unit → complete, fact-checked LaTeX (research tools)
-   inventory    each draft → checklist of every content item (ids)
-   survey       map the TOPIC with research: important methods, their role
-                (core / supporting / brief), key papers, what the seeds miss
-   outline      one storyline; every item placed; depth and word target per section
-   write        each section, with a map of what every section covers (parallel)
-   review       per section: coverage + rigor + depth + flow → revise (×2)
-   edit         an editor reads the WHOLE tutorial: repetition, consistency,
-                order, transitions, balance → fix flagged sections (×2)
-   bibliography \cite keys → grounded thebibliography (batches of 12)
-   compile      latexmk + edit-based repair that may not delete content
+   survey     map the TOPIC with research: methods, importance, key papers,
+              what the sources miss
+   plan       SCOPE: every method/topic as main line / stepping stone /
+              mention / excluded, with pages and a reason  ──► plan.md (editable)
+   ─────────── --plan-only stops here ───────────
+   draft      each source part → fact-checked material, scoped by the plan
+   inventory  each draft → items of content
+   outline    one storyline; items placed (or omitted with a reason);
+              section lengths from the plan's pages
+   write      each section, with a map of the whole tutorial   (parallel)
+   review     coverage, rigor, depth, length, flow → revise (×2)
+   edit       an editor reads the WHOLE tutorial → fix flagged sections (×2)
+   bibliography, compile, layout check
 ```
 
-**A holistic view at both ends.** The outline is designed in one pass over the
-inventory of all sources. Every section writer gets a map of the whole
-tutorial — each section's purpose and the content it covers — so it knows
-exactly what the reader already has and what comes later, plus the plans of its
-neighbouring sections. After writing, an editor reads the whole assembled
-tutorial and reports what only shows across sections (repetition, inconsistent
-notation or terms, forward references, transitions that don't fit, uneven
-depth, contradictions, storyline gaps); the affected sections are revised with
-the editor's notes and the text of the related sections, and the editor reads
-again (`--editorial-rounds`, default 2). Findings go to
-`work/tutorial/editorial.json`.
+**Scope is an explicit decision.** The plan tests every candidate against the
+throughline: does it need it, does a later method build on it, is it used in
+practice, does it bring an idea found nowhere else, would leaving it out leave
+a gap? A page budget is spent by cutting **breadth** (demoting or excluding the
+least necessary entries), never by squeezing main-line methods. The plan is
+shown before anything is written, and you can change it.
 
-Independent requests run in parallel (`--parallel`, default 6): triage
-batches, drafts, inventories, sections (each written and reviewed on its own),
-editorial fixes, and bibliography batches.
+**Lengths follow the plan.** Section targets come from the pages the plan gives
+each entry (figures, tables, and algorithm boxes count against them). Writers
+treat the target as a cap; a first version well over it is condensed before
+review; reviews flag over- and under-length; the editor sees every length.
 
-**Nothing is dropped.** The inventory is a checklist: the outline must place
-every item, and anything it misses after retries is attached in code. Each
-section is reviewed for coverage of its items and revised; revisions that cut
-text, and LaTeX repairs that delete figures, citations, or sections, are
-rejected. Every model output is validated (empty or truncated responses are
-detected by required end markers) and retried; if it still fails the run
-**stops** rather than skipping content, and re-running resumes from the cache.
+**Holistic view.** Every writer gets a map of the whole tutorial (each section's
+purpose and the content it covers) and the plans of its neighbours. After
+writing, an editor reads the whole assembled tutorial for repetition,
+inconsistency, order, transitions, balance, contradictions, and storyline gaps,
+and the affected sections are revised.
 
-### Frames: how images are chosen
+**Nothing is lost silently.** Every item of content is placed in a section or
+omitted with a recorded reason (its topic is excluded by the plan, or it is
+tangential). Every model output is validated and retried; if it still fails the
+run **stops** rather than skipping content, and re-running resumes from the
+cache. Revisions and LaTeX repairs that delete content are rejected.
 
-1. Sample a frame every 2 s.
-2. Split into **runs of a stable visual state** by per-pixel change between
-   consecutive samples (a new slide, a new equation line, a new build step all
-   start a new run). Keep the sharpest of the **last** frames of each run — a
-   slide being built up is most complete just before it changes.
-3. **Triage**: a vision model (`VITEX_TRIAGE_MODEL`) looks at every distinct
-   frame, in order, with the narration around it, and records its kind,
-   legibility, completeness, a 0–10 teaching value with a reason, the
-   text/equations on it, and whether one of the next frames is the same slide
-   more complete. Notes are saved in `work/<source>/triage.json`.
-4. Each seed unit attaches its highest-value eligible frames (`--max-images`,
-   `--min-frame-value`) and gets a timeline of **all** frames' content, so what
-   was on screen reaches the tutorial even when the image isn't attached.
+### Frames
 
-### Scope and length
-
-The survey reviews the field independently of the sources, so the tutorial
-covers what matters in the topic: important methods the sources miss are added,
-and minor ones stay compact even if a source dwelt on them. The introduction
-gets a short overview of the field and its literature.
-
-The length budget comes from the same map — an allowance per distinct topic by
-role (about 2,500 words for a core topic, 900 for a supporting one, 120 for a
-brief one) — not from the amount of source material, so overlapping sources do
-not inflate it. Override it with `--pages N`. The outline splits the budget
-into a word target per section; writers aim for it, and reviews flag sections
-well over or under it.
+Frames are sampled every 2 s and reduced to one per distinct visual state (the
+sharpest frame at the end of each run, i.e. the most complete version of a
+slide being built up). A vision model (`VITEX_TRIAGE_MODEL`) rates every
+distinct frame — kind, legibility, completeness, a 0–10 teaching value with a
+reason, the text/equations on it, and whether a later frame supersedes it.
+Each source part attaches its best frames and gets a timeline of all frames'
+content.
 
 ### Research
 
-During drafting, outlining, writing, reviewing, and the bibliography, Claude
-can call keyless tools — arXiv search, DuckDuckGo web search, and page fetching
-— up to `--research-iterations` rounds per pass (default 16), to verify claims,
-formulas, numbers, and attributions and to find primary sources, cited with
-`\cite{...}`. `fetch_url` only reaches public http(s) hosts.
+The survey, plan, drafts, outline, sections, reviews, and bibliography can call
+keyless research tools — arXiv search, DuckDuckGo web search, page fetching —
+up to `--research-iterations` rounds per pass, to verify claims and find
+primary sources, cited with `\cite{...}`. `fetch_url` only reaches public
+http(s) hosts.
 
 ## Install
 
@@ -144,96 +118,141 @@ uv pip install -e ".[whisper,pdf,dev]"   # Bedrock + local Whisper + PDF documen
 # add the `aws` extra for Amazon Transcribe
 ```
 
-The package is installed in editable mode, so code changes take effect without
-reinstalling. If you use `uv sync`, name the extras
+Run `vitex` with the venv active (it also provides `yt-dlp`). The package is
+installed in editable mode. If you use `uv sync`, name the extras
 (`uv sync --extra whisper --extra pdf --extra dev`) — a plain `uv sync` removes
 faster-whisper and pypdf.
 
 ## Setup
 
-Copy `.env.example` to `.env`. For Bedrock (the default) two settings matter:
+Copy `.env.example` to `.env`. For Bedrock (the default):
 
 ```bash
-# REQUIRED: the ~/.aws profile used for every AWS call. There is deliberately
-# no fallback to AWS_PROFILE, env keys, or [default] — without it the run stops.
+# REQUIRED: the ~/.aws profile for every AWS call. There is deliberately no
+# fallback to AWS_PROFILE, env keys, or [default] — without it the run stops.
 VITEX_AWS_PROFILE=my-bedrock-profile
 AWS_REGION=us-west-2
 
-# Models (Bedrock inference-profile ids your account can invoke)
 VITEX_MODEL=us.anthropic.claude-opus-5-5          # all writing passes
 VITEX_TRIAGE_MODEL=us.anthropic.claude-haiku-5-5  # frame rating (cheap; default: VITEX_MODEL)
-VITEX_FIX_MODEL=us.anthropic.claude-sonnet-5-5    # LaTeX repair (default: VITEX_MODEL)
+VITEX_FIX_MODEL=us.anthropic.claude-sonnet-5-5    # LaTeX repair/layout (default: VITEX_MODEL)
 # VITEX_EFFORT=high                               # low…max; Opus 5.5's own default is medium
 ```
 
-Check which account a profile resolves to with
-`aws sts get-caller-identity --profile <profile>`; vitex only needs
-`bedrock:InvokeModel` (plus S3 and Transcribe for `--transcriber aws`), so a
-least-privilege profile is preferable to an admin one.
-
-To use the Anthropic API instead: `VITEX_PROVIDER=anthropic`,
-`ANTHROPIC_API_KEY=...`, and public model ids (e.g. `claude-opus-5-5`); no AWS
+`aws sts get-caller-identity --profile <profile>` shows which account a profile
+uses; vitex only needs `bedrock:InvokeModel` (plus S3 and Transcribe for
+`--transcriber aws`). For the Anthropic API instead: `VITEX_PROVIDER=anthropic`,
+`ANTHROPIC_API_KEY=...`, public model ids (e.g. `claude-opus-5-5`); no AWS
 profile is needed then (unless you use Amazon Transcribe).
 
 ## Usage
 
-Run from the repo root with the venv active.
+Run from the repo root with the venv active. `--name` is the tutorial's
+identity: its work dir `work/runs/<name>/` and its output `output/<name>/`.
+
+### End to end
 
 ```bash
-# one video
-vitex run "https://www.youtube.com/watch?v=XXXX"
+vitex run "https://www.youtube.com/watch?v=XXXX" --name attention --pages 60
 
-# several videos merged into one tutorial
-vitex run "https://youtu.be/AAAA" "https://youtu.be/BBBB" lecture3.mp4 --title "Efficient Attention"
-
-# improve an existing tutorial with a video, steered by a brief in a file
-vitex run "https://www.youtube.com/watch?v=mg-iU-WxiNs" \
-  --doc output/rl_tutorial/rl_tutorial.tex \
-  --title "A Comprehensive Tutorial on Reinforcement Learning: From Dynamic Programming to Language-Model Reasoning" \
-  --name modern_rl \
-  --guide-file briefs/modern_rl.md
-
-# documents only: rewrite an existing tutorial that isn't well written
-vitex run --doc draft.tex --doc notes.md --guide "Rewrite this into a rigorous, much more detailed tutorial."
+# several videos and documents, steered by a brief
+vitex run URL1 URL2 lecture3.mp4 --doc notes.md --doc old_tutorial/main.tex \
+  --name efficient_attention --title "Efficient Attention" \
+  --guide-file briefs/attention.md --pages 80
 ```
 
-- **`--title`** is the title printed in the document; without it, the outline
-  pass proposes one.
-- **`--name`** names the output: `output/<name>/<name>.{tex,pdf}` plus
-  `figures/`. Without it, the title made filesystem-safe (punctuation removed,
-  spaces → `_`).
-- **`--guide` / `--guide-file`** is an **author's brief** added to every writing
-  pass (drafts, outline, sections, reviews, revisions): scope, focus, emphasis,
-  audience, which parts to keep and which to rework, special instructions. It
-  overrides the defaults where they conflict; the explanation standard always
-  applies. Seed content is kept unless the brief explicitly asks to leave
-  something out — such items are listed in the outline and the log. Example
-  briefs live in [briefs/](briefs/).
-- **`--doc`** accepts `.tex` (with `\input`/`\include` resolved and figures
-  carried over), `.md` (images carried over), `.txt`, and `.pdf` (text only).
-  vitex always writes a whole new tutorial: a brief can ask to keep parts close
-  to the original, but they are regenerated, not copied.
+### In two steps: plan, then write
 
-### Results and what to inspect
+```bash
+# 1. plan only (fast): survey + plan, then stop
+vitex run URL --doc old.tex --name modern_rl --guide-file brief.md --pages 70 --plan-only
+#    -> work/runs/modern_rl/plan.md
 
-| Path | Contents |
-|---|---|
-| `output/<name>/<name>.tex`, `.pdf`, `figures/` | the tutorial |
-| `work/tutorial/coverage.json` | per section: assigned items and figures, every review round, whether it was approved |
-| `work/tutorial/editorial.json` | each whole-tutorial editorial round: assessment, cross-section issues, which sections were revised |
-| `work/tutorial/survey.json` | the literature map: every topic with its role, reason, key references, and whether the sources cover it |
-| `work/tutorial/outline.json` | the storyline, sections, plans, and item placement (and any items the brief excluded) |
-| `work/drafts/<unit>.tex`, `<unit>.items.json` | the fact-checked draft and content inventory of each seed unit |
-| `work/<source>/triage.json` | the rating and reason for every distinct video frame |
-| `work/<source>/transcript.json`, `frames/` | transcript and distinct frames of each video |
+# 2. review/change the plan (see below), then write the tutorial from it
+vitex run URL --doc old.tex --name modern_rl --guide-file brief.md --plan work/runs/modern_rl/plan.md
+```
 
-### Resuming
+`--plan FILE` uses exactly that file — the saved `plan.md`, an edited copy kept
+anywhere, or another tutorial's plan adapted for this one. Without `--plan`, a
+run reuses the saved `plan.md` of its `--name` (it never silently replaces it;
+`--replan` makes a fresh one, and vitex warns if the sources or brief changed
+since the plan was made).
 
-Every expensive stage caches under `work/`. Each artifact has a `<name>.key`
-sidecar fingerprinting its inputs (settings, model, prompts, brief, upstream
-content), so re-running the same command picks up where it left off, and
-changing a setting regenerates exactly what it affects. `--force` recomputes
-everything.
+### Changing the plan
+
+`plan.md` is plain markdown, written to be edited:
+
+```markdown
+# Plan: A Comprehensive Tutorial on Reinforcement Learning ...
+Budget: 70 pages
+
+## Scope
+Reader: technically mature, new to RL; knows supervised learning.
+Goal: understand and implement the RL methods used to train LLMs.
+Throughline: MDPs -> value methods -> policy gradients -> PPO -> RLHF, GRPO, DPO.
+
+## Main line — full treatment
+- DQN | 4 | first deep value method; replay + target networks reused later
+- PPO | 5 | default on-policy optimizer; the optimizer of RLHF; GRPO's template
+
+## Stepping stones — compact but proper
+- Double DQN | 1 | max-overestimation; the same fix is TD3's clipped double Q
+
+## Mentions — a few sentences in context
+- Noisy Nets | parameter-space exploration; not needed for the throughline
+
+## Excluded
+- C51 / QR-DQN | distributional RL is not used by any later method in scope
+```
+
+Two ways to change it:
+
+1. **Edit the file**: move a line to another level, change pages, add or delete
+   entries, rewrite the scope or throughline, change the budget. Lines are
+   `- name | pages | reason` (main line, stepping stones) or `- name | reason`
+   (mentions, excluded). The next run reads your version as is; vitex reports
+   errors with line numbers and warns if the pages exceed the budget.
+2. **Give feedback** and let the planner revise it:
+   ```bash
+   vitex run ... --name modern_rl --plan-only --plan-feedback "Drop offline RL. Give DPO a full section."
+   # or --plan-feedback-file notes.md
+   ```
+   The revised plan replaces `plan.md` (the previous one is kept as
+   `plan.v1.md`, `plan.v2.md`, …) and the changes are printed. Repeat until it
+   is right, then run without `--plan-only`.
+
+### Title, name, brief
+
+- **`--title`** is printed in the document; without it the plan proposes one.
+- **`--name`** names the run and the output; without it, the title (made
+  filesystem-safe), else the first source's title.
+- **`--guide` / `--guide-file`** is an **author's brief** added to the plan and
+  every writing pass: scope, focus, emphasis, audience, special instructions.
+  Example briefs live in [briefs/](briefs/).
+- **`--pages`** sets the budget; without it the plan uses what the scope needs,
+  up to a ceiling sized from the survey.
+
+## Files
+
+```
+work/
+  sources/<source>/     per video/document: download, audio, transcript, frames,
+                        triage.json — shared by every tutorial using the source
+  runs/<name>/          one tutorial:
+    plan.md (+ plan.vN.md)   the scope decision (editable)
+    survey.json              the literature map: topics, importance, key refs
+    drafts/                  fact-checked material and inventories per source part
+    outline.json             storyline, sections, item placement, omitted items + reasons
+    sections/, editorial/    written sections, review and editorial caches
+    coverage.json            per section: items, reviews, approval
+    editorial.json           whole-tutorial editorial rounds and fixes
+    run.log                  the full log of every run
+output/<name>/<name>.tex, .pdf, figures/
+```
+
+Every artifact has a `<name>.key` sidecar fingerprinting its inputs, so a rerun
+resumes where it left off and a changed setting, prompt, or plan regenerates
+exactly what it affects. `--force` recomputes everything.
 
 ## Configuration
 
@@ -243,46 +262,48 @@ Precedence: built-in defaults → `.env`/environment → CLI flags.
 |---|---|---|
 | `sources…` | — | video URLs / files (any number, or none with `--doc`) |
 | `--doc PATH` | — | document seed (.tex/.md/.txt/.pdf), repeatable |
-| `--title` | — | title printed in the document (default: proposed by the outline) |
-| `--name` | — | output dir/file name (default: the title, filesystem-safe) |
-| `--guide` / `--guide-file` | — | author's brief steering every writing pass |
+| `--name` | — | the tutorial's identity: `work/runs/<name>/`, `output/<name>/` |
+| `--title` | — | title printed in the document (default: from the plan) |
+| `--guide` / `--guide-file` | — | author's brief for the plan and every writing pass |
+| `--pages` | — | page budget (default: what the scope needs, up to a survey-sized ceiling) |
+| `--plan-only` | — | stop after writing the plan |
+| `--plan FILE` | — | write the tutorial from exactly this plan |
+| `--plan-feedback` / `--plan-feedback-file` | — | revise the current plan with notes |
+| `--replan` | — | make a fresh plan instead of reusing the saved one |
 | `--provider` | `VITEX_PROVIDER` | `bedrock` (default) or `anthropic` |
-| — | `VITEX_AWS_PROFILE` | `~/.aws` profile for all AWS calls; **required** for Bedrock / Amazon Transcribe |
+| — | `VITEX_AWS_PROFILE` | `~/.aws` profile for all AWS calls; **required** for Bedrock / Transcribe |
 | `--aws-region` | `AWS_REGION` | region for Bedrock / Transcribe |
 | `--model` | `VITEX_MODEL` | main model (default `us.anthropic.claude-opus-5-5`) |
 | — | `VITEX_EFFORT` | reasoning effort of the main model, `low`…`max` (default `high`) |
 | `--triage-model` | `VITEX_TRIAGE_MODEL` | vision model for frame rating (default: `--model`) |
-| `--fix-model` | `VITEX_FIX_MODEL` | model for the LaTeX repair pass (default: `--model`) |
+| `--fix-model` | `VITEX_FIX_MODEL` | model for LaTeX repair and layout fixes (default: `--model`) |
 | `--ground` / `--no-ground` | `VITEX_GROUND` | research tools + citations, on by default |
 | `--research-iterations` | — | research rounds per pass (default 16) |
 | `--review-rounds` | — | review+revise rounds per section (default 2; 0 = off) |
 | `--editorial-rounds` | — | whole-tutorial editing rounds (default 2; 0 = off) |
-| `--pages` | — | target length in pages (default: sized from the survey's topics) |
-| `--parallel` | `VITEX_PARALLEL` | independent Claude requests run at once (default 6; 1 = sequential) |
+| `--parallel` | `VITEX_PARALLEL` | independent Claude requests at once (default 6) |
 | `--prompt-cache` / `--no-prompt-cache` | `VITEX_PROMPT_CACHE` | prompt caching, on by default |
 | `--transcriber` | `VITEX_TRANSCRIBER` | `whisper` (default) or `aws` |
 | `--whisper-model` | `VITEX_WHISPER_MODEL` | `tiny`…`large-v3` |
 | — | `VITEX_TRANSCRIBE_BUCKET` | S3 bucket, required for `--transcriber aws` |
 | `--frame-interval` | — | seconds between sampled frames (default 2) |
-| `--max-images` | — | frames attached per video seed unit (default 16) |
+| `--max-images` | — | frames attached per video part (default 16) |
 | `--min-frame-value` | — | triage score needed to attach a frame (default 5) |
-| `--chunk-minutes` | — | minutes of video per seed unit (default 8) |
+| `--chunk-minutes` | — | minutes of video per part (default 8) |
 | `--no-pdf` / `--force` | — | skip compilation / ignore cache |
 
-**Cost** scales with input length and thoroughness: per seed unit a draft and an
-inventory; per section a write plus up to 2 reviews and revisions, each with
-research. Lower `--review-rounds`, `--research-iterations`, or `VITEX_EFFORT`
-for cheaper runs; a Haiku triage model keeps frame rating cheap.
+Every Claude request is logged with its stage, model, duration, tokens, and a
+running cost estimate; a per-model usage summary ends every run.
 
 ## How vitex talks to Claude
 
 Requests are streamed (up to 128K output tokens; longer output is continued by
 quoting what was written so far in a new user turn). The conversation is
-append-only and structured answers use an unforced `submit` tool call, because
-current models (e.g. Claude Opus 5.5) reject assistant prefill, forced
-`tool_choice`, and edited history. The system prompt and the first (image-heavy)
-turn are prompt-cached. Only transient errors (throttling, 5xx, network) are
-retried; a rejected request fails immediately with the API's message.
+append-only and structured answers use an unforced `submit` tool call checked
+against its schema, because current models (e.g. Claude Opus 5.5) reject
+assistant prefill, forced `tool_choice`, and edited history. The system prompt
+and the first (image-heavy) turn are prompt-cached. Only transient errors are
+retried; independent requests run in parallel.
 
 ## Package layout
 
@@ -290,30 +311,26 @@ retried; a rejected request fails immediately with the API's message.
 src/vitex/
   cli.py, config.py, pipeline.py   entry point, settings, stage orchestration
   models.py                        Segment / Frame / FrameNote / Figure / SeedUnit
-  media/        download, audio, frames (visual states), triage (vision), documents
+  media/        download, audio, frames, triage (vision), documents
   transcribe/   whisper_local, aws_transcribe
-  llm/          Claude client (text, tools, structured), prompts, research tools
-  reconstruct/  seeds, chapters (draft + bibliography), outline (inventory +
-                outline), writer (sections + review), segmenter, align
-  output/       latex (preamble, assembly, figures), build (compile + repair)
+  llm/          Claude client, prompts, research tools
+  reconstruct/  seeds, survey, plan, chapters (drafts + bibliography),
+                outline (inventory + outline), writer (sections, review, editor)
+  output/       latex (preamble, assembly, figures), build (compile, repair, layout)
 briefs/         example author's briefs (--guide-file)
-tests/          unit tests, plus an end-to-end run with a scripted model
+tests/          unit tests, plus end-to-end runs with a scripted model
 ```
 
 Run the tests with `pytest`; type-check with `mypy src`.
 
 ## Limitations
 
-- **Long inputs:** no hard limit. Videos are drafted in 8-minute units, frames
-  are capped at 20 distinct states per minute, and citations are resolved in
-  batches; the outline sees the inventory of all sources in one request, which
-  fits the 1M-token context for many hours of material. Cost and time grow
-  linearly. Local Whisper runs at about 8× real time on CPU (`small` model);
+- **Long inputs:** no hard limit; cost and time grow with the sources and the
+  page budget. Local Whisper runs at about 8× real time on CPU (`small`);
   Amazon Transcribe accepts at most 4 hours of audio per file.
 - **Models:** Bedrock model ids differ by account and region. Claude Fable
   models require 30-day data retention and are rejected on accounts whose
-  retention setting doesn't meet it ("data retention mode 'default' is not
-  available for this model").
+  retention setting doesn't meet it.
 - Handwriting and low-contrast slides may not read reliably; triage and the
   writers ground ambiguous content against the literature.
 - Web search is best-effort (keyless DuckDuckGo) and may be rate-limited; arXiv

@@ -21,7 +21,7 @@ from pathlib import Path
 from vitex.config import Config
 from vitex.errors import BuildError
 from vitex.llm.client import ClaudeClient, staged
-from vitex.llm.prompts import FIX_FULL_SYSTEM, FIX_SYSTEM, fix_user
+from vitex.llm.prompts import FIX_FULL_SYSTEM, FIX_SYSTEM, LAYOUT_SYSTEM, fix_user, layout_user
 from vitex.output.latex import cite_keys, referenced_figures
 
 log = logging.getLogger("vitex")
@@ -29,6 +29,13 @@ log = logging.getLogger("vitex")
 _MAX_REPAIRS = 5
 _MAX_ERRORS = 5  # error excerpts sent per repair round
 _MAX_SHRINK = 0.03  # a repair may not remove more than this share of the text
+
+_OVERFULL_RE = re.compile(
+    r"Overfull \\hbox \(([\d.]+)pt too wide\) (?:in paragraph at lines (\d+)--(\d+)|detected at line (\d+))"
+)
+_LAYOUT_TOLERANCE_PT = 5.0  # smaller overflows are invisible in print
+_LAYOUT_ROUNDS = 2
+_MAX_LAYOUT_ISSUES = 30  # per round
 
 _EDIT_RE = re.compile(r"<<<<<<< SEARCH\n(.*?)\n=======\n(.*?)>>>>>>> REPLACE", re.DOTALL)
 _LINE_RE = re.compile(r"^l\.(\d+)")
@@ -94,6 +101,28 @@ def error_excerpts(tex_log: str, document: str) -> str:
     return "\n\n".join(out)
 
 
+def overflows(tex_log: str, tolerance: float = _LAYOUT_TOLERANCE_PT) -> list[tuple[float, int, int]]:
+    """(points too wide, first line, last line) of every visible overflow."""
+    found = []
+    for m in _OVERFULL_RE.finditer(tex_log):
+        pt = float(m.group(1))
+        if pt <= tolerance:
+            continue
+        first = int(m.group(2) or m.group(4))
+        found.append((pt, first, int(m.group(3) or m.group(4))))
+    return found
+
+
+def overflow_excerpts(found: list[tuple[float, int, int]], document: str) -> str:
+    src = document.splitlines()
+    blocks = []
+    for pt, first, last in sorted(found, key=lambda f: -f[0])[:_MAX_LAYOUT_ISSUES]:
+        lo, hi = max(1, first - 2), min(len(src), last + 2)
+        lines = "\n".join(f"{n:>6}| {src[n - 1]}" for n in range(lo, hi + 1))
+        blocks.append(f"{pt:.0f}pt too wide at lines {first}-{last}:\n{lines}")
+    return "\n\n".join(blocks)
+
+
 def apply_edits(document: str, reply: str) -> str | None:
     """Apply SEARCH/REPLACE blocks from ``reply``; None if any fails to apply.
 
@@ -124,18 +153,20 @@ def content_losses(before: str, after: str) -> list[str]:
     return losses
 
 
-def _repair(client: ClaudeClient, document: str, user: str, cfg: Config) -> str | None:
+def _repair(
+    client: ClaudeClient, document: str, user: str, cfg: Config, system: str = FIX_SYSTEM, allow_rewrite: bool = True
+) -> str | None:
     """One repair round: targeted edits, else a full rewrite. None if both fail."""
     from vitex.reconstruct.chapters import _check_document, strip_fences
 
     reply = client.complete(
-        system=FIX_SYSTEM,
+        system=system,
         text=user,
         model=cfg.effective_fix_model,
         max_tokens=cfg.max_output_tokens,
     )
     patched = apply_edits(document, strip_fences(reply))
-    if patched is not None:
+    if patched is not None or not allow_rewrite:
         return patched
 
     log.warning("Repair edits did not apply cleanly; requesting the full corrected document.")
@@ -170,7 +201,7 @@ def build_pdf(
     ok, logtxt = _compile_once(tex_path)
     if ok:
         log.info("PDF built: %s", tex_path.with_suffix(".pdf"))
-        return tex_path.with_suffix(".pdf")
+        return _fix_layout(client, document, tex_path, cfg)
 
     rejected = ""
     for attempt in range(1, _MAX_REPAIRS + 1):
@@ -193,9 +224,51 @@ def build_pdf(
         ok, logtxt = _compile_once(tex_path)
         if ok:
             log.info("PDF built after repair: %s", tex_path.with_suffix(".pdf"))
-            return tex_path.with_suffix(".pdf")
+            return _fix_layout(client, document, tex_path, cfg)
 
     raise BuildError(
         f"LaTeX still fails after {_MAX_REPAIRS} repair attempts. "
         f"The document is saved at {tex_path}; inspect the build log to fix it by hand."
     )
+
+
+def _fix_layout(client: ClaudeClient, document: str, tex_path: Path, cfg: Config) -> Path:
+    """Fix content wider than the text (overfull boxes) in a compiled document.
+
+    Each round sends the overflowing lines to the fixer for edits that may not
+    change content; the result is kept only if it compiles, loses nothing, and
+    has fewer overflows. The PDF on disk always matches the kept ``.tex``.
+    """
+    pdf = tex_path.with_suffix(".pdf")
+    tex_log = tex_path.with_suffix(".log")
+    found = overflows(tex_log.read_text(encoding="utf-8", errors="replace")) if tex_log.exists() else []
+    rejected = ""
+    for rnd in range(1, _LAYOUT_ROUNDS + 1):
+        if not found:
+            break
+        log.info("Layout: %d line(s) wider than the text (worst %.0fpt); fixing, round %d/%d",
+                 len(found), max(f[0] for f in found), rnd, _LAYOUT_ROUNDS)
+        with staged(client, f"layout {rnd}/{_LAYOUT_ROUNDS}"):
+            patched = _repair(client, document, layout_user(document, overflow_excerpts(found, document), rejected),
+                              cfg, system=LAYOUT_SYSTEM, allow_rewrite=False)
+        if patched is None:
+            log.warning("Layout: edits did not apply cleanly; keeping the current version")
+            continue
+        if losses := content_losses(document, patched):
+            rejected = "; ".join(losses) + ". Fix the layout without deleting content."
+            log.warning("Layout: rejected a fix that %s", rejected)
+            continue
+        tex_path.write_text(patched, encoding="utf-8")
+        ok, _ = _compile_once(tex_path)
+        after = overflows(tex_log.read_text(encoding="utf-8", errors="replace")) if ok and tex_log.exists() else None
+        if after is None or len(after) >= len(found):
+            log.warning("Layout: the fix did not help; keeping the previous version")
+            tex_path.write_text(document, encoding="utf-8")
+            _compile_once(tex_path)
+            continue
+        document, found, rejected = patched, after, ""
+    if found:
+        log.warning("Layout: %d line(s) still wider than the text (see %s)", len(found), tex_log)
+    else:
+        log.info("Layout: nothing wider than the text")
+    return pdf

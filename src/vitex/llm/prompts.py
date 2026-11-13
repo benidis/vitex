@@ -37,12 +37,14 @@ videos or documents, they must understand all of it.
 2. Intuition, then formalism. Explain the idea in words (with a concrete example
    or analogy where it helps), then give the precise math, then tie every symbol
    back to the intuition.
-3. No logical jumps in what you derive. Derive the key results — the objectives,
-   gradients, and update rules a method is built on — step by step, saying what
-   was done at each step and why; never jump from setup to result. Theorems
-   (convergence guarantees, bounds, optimality results) are stated precisely,
-   with the intuition for why they hold and a citation for the proof; do not
-   prove them.
+3. No logical jumps in what you derive. Derive the results that explain how a
+   method works — its objective, gradient, update rule, and the key identities
+   it relies on — step by step, saying what was done at each step and why. Do
+   not derive general background (basic probability, set theory, standard
+   inequalities): assume it or state it in a line. Theorems (convergence
+   guarantees, bounds, optimality results) are stated precisely, with the
+   intuition for why they hold and a citation for the proof; do not prove them
+   unless the proof itself shows how the method works.
 4. No assumed knowledge of the topic. Define every term and symbol at its first
    use. If a tool from outside the topic is needed, explain it briefly where it
    is first needed.
@@ -60,22 +62,23 @@ videos or documents, they must understand all of it.
    before the general one. Where it teaches best, follow the arc: the problem,
    the natural first attempt, exactly why it falls short, then the better
    solution.
-8. Depth follows the idea's ROLE and difficulty — not the source, and not "as
+8. Depth follows the idea's LEVEL in the plan — not the source, and not "as
    much as possible". You are responsible for the reader understanding every
-   idea, however well or badly a source explained it, and for spending the
-   reader's time where it matters:
-   - CORE ideas (the main line of the storyline): the full treatment — problem
-     setup, intuition, the key derivation step by step, and, where they teach,
-     the algorithm, cost analysis, and a worked example.
-   - SUPPORTING ideas (variants, refinements, alternatives): compact but
-     complete — which problem of the base method they address, the idea, the key
-     equation(s) and what changes relative to the base method (derived briefly),
-     how they are used in practice, and the trade-off. The reader must follow the
-     why and the how; a one-line mention is not enough. Usually a page or two.
-   - BRIEF ideas (context, passing mentions, historical notes): a few sentences
-     or a row in a comparison table, with a citation.
-   A source's brevity is never a reason to under-explain a core idea; a source's
-   length is never a reason to over-explain a minor one.
+   idea that is included, however well or badly a source explained it, and for
+   spending the reader's time where it matters:
+   - MAIN LINE (core): the full treatment — problem setup, intuition, the key
+     derivation step by step, and, where they teach, the algorithm, cost
+     analysis, and a worked example.
+   - STEPPING STONE (supporting): compact but proper — which problem of the
+     base method it addresses, the idea, the key equation(s) and what changes
+     relative to the base method (derived briefly), how it is used in practice,
+     and the trade-off. The reader must follow the why and the how; a one-line
+     mention is not enough.
+   - MENTION (brief): a few sentences in context — what it is and why it is not
+     developed further — or a row in a comparison table, with a citation.
+   Whatever is included is treated properly at its level, with a flow. A
+   source's brevity is never a reason to under-explain a main-line idea; a
+   source's length is never a reason to over-explain a minor one.
 9. Use extras where they teach, not by default:
    - an algorithm box (pseudocode as it is run in practice) for core methods,
      and for variants whose procedure differs materially;
@@ -154,6 +157,10 @@ LATEX
   definition, example, theorem, and proof. Use nothing else: no other packages
   and no custom macros.
 - Display math with equation/align or \[...\], never $$. Code in lstlisting.
+- Nothing may be wider than the text: break long display equations (multline,
+  split inside equation, or align/aligned at "=" or "+"), keep tables within
+  \linewidth (tabularx with X columns, p{...} columns, \small if needed), keep
+  algorithm lines short, and use \url for long URLs.
 - Algorithms (pseudocode) in \begin{algorithm}[ht]\caption{...}\label{alg:...}
   \begin{algorithmic}[1] ... \end{algorithmic}\end{algorithm}, using
   \Require, \Ensure, \State, \For/\EndFor, \While/\EndWhile, \If/\EndIf,
@@ -301,6 +308,7 @@ def draft_user(
     figure_lines: str,
     visual_notes: str,
     target_words: int,
+    scope: str = "",
 ) -> str:
     if kind == "video":
         intro = (
@@ -322,8 +330,14 @@ def draft_user(
     return f"""
 {intro}
 
-Length target for this draft: about {target_words} words (more only where a core
-idea needs it; less where the seed is padded or repetitive).
+Length target for this draft: about {target_words} words (more only where a
+main-line idea needs it; less where the seed is padded, repetitive, or outside
+the scope).
+{f"""
+The tutorial's plan (develop main-line and stepping-stone topics at their level;
+give mentions a few sentences; skip excluded topics, at most one sentence each):
+{scope}
+""" if scope else ""}
 
 Figures attached (use these exact file names):
 {figures}
@@ -407,7 +421,7 @@ def survey_system(ground: bool, guide: str | None = None) -> str:
     )
     return f"""
 You are a senior researcher preparing the literature map for a tutorial. You get
-a summary of what the seeds (videos and documents) cover. Map the TOPIC itself,
+the seeds (videos and documents) the tutorial starts from. Map the TOPIC itself,
 not just the seeds: which methods and concepts a learner of this topic must
 understand, how they relate, and how important each one is.
 
@@ -453,15 +467,114 @@ SURVEY_SCHEMA = {
 }
 
 
-def survey_user(title: str | None, sources: str, topics: str) -> str:
+def survey_user(title: str | None, seeds: str) -> str:
     return f"""
 Tutorial: {title or "(title to be decided)"}
 
-Seeds and what each covers:
-{sources}
+The seeds (videos: transcript and on-screen content; documents: text):
+{seeds}
+""".strip()
 
-Topics the seeds' content inventory touches (item titles):
-{topics}
+
+# ---------------------------------------------------------------------------
+# Pass 2c: the plan — what the tutorial includes, at what level, and why
+# ---------------------------------------------------------------------------
+
+PLAN_LEVELS = ("main", "stepping", "mention", "excluded")
+
+
+def plan_system(guide: str | None = None) -> str:
+    return f"""
+You are the lead author deciding the SCOPE of a tutorial: which methods and
+topics it includes, at what level, and why. You get a literature map of the
+topic (from a survey of the field, with what the seeds cover) and a page budget.
+
+It is a TUTORIAL on its topic — not a literature overview of every method that
+exists. It must explain the important advances properly and decide which of the
+smaller improvements and alternatives to include, and in what capacity.
+
+First write the scope, briefly: the reader (what they already know), the goal
+(what they can understand or do afterwards), and the throughline (the path from
+the first problem to the final results) — two to four sentences each.
+
+Then decide every candidate topic, using this test: Does the throughline need
+it? Does a later included method build on it? Is it what is used in practice?
+Does it introduce an idea found nowhere else? Would leaving it out leave a gap
+in understanding?
+- main: a milestone the throughline passes through (full treatment: at least
+  1.5 pages, typically 3-6).
+- stepping: a stepping stone — introduces an idea needed later or fixes a
+  limitation that matters to the story (compact but proper: at least 0.75
+  pages, typically 1-2). If it cannot get that, it is a mention.
+- mention: notable but off the path; a few sentences in context (no pages).
+- excluded: not needed for the throughline or the reader's goal.
+Give every entry a one-line reason (one sentence) that says why it is in at that
+level, or why it is out.
+
+Be selective. A tutorial of a given length covers fewer things properly rather
+than many things thinly: excluding methods is expected — including ones the
+seeds cover — whenever the throughline does not need them. Treat a family of
+closely related variants as ONE entry (explained together, compared in a table)
+rather than one entry per variant. Include important topics the seeds miss only
+when the throughline needs them.
+
+Budget: pages include figures, tables, and algorithm boxes; about 4 pages go to
+the introduction (with a short overview of the field) and the summary. If the
+budget is tight, cut BREADTH — demote or exclude the least necessary entries —
+never squeeze a main-line entry below its proper treatment. The pages of all
+main and stepping entries plus about 4 must not exceed the budget.{brief_block(guide)}
+""".strip()
+
+
+PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "reader": {"type": "string"},
+        "goal": {"type": "string"},
+        "throughline": {"type": "string"},
+        "entries": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "level": {"type": "string", "enum": list(PLAN_LEVELS)},
+                    "pages": {"type": "number", "description": "Pages for main/stepping entries; 0 otherwise."},
+                    "reason": {"type": "string"},
+                },
+                "required": ["name", "level", "pages", "reason"],
+            },
+        },
+    },
+    "required": ["title", "reader", "goal", "throughline", "entries"],
+}
+
+
+def plan_user(title: str | None, budget: str, landscape: str) -> str:
+    return f"""
+{f"Title: {title}" if title else "Propose a precise title."}
+Page budget: {budget}
+
+Literature map of the topic:
+{landscape}
+""".strip()
+
+
+def plan_revise_user(current_plan: str, feedback: str, budget: str, landscape: str) -> str:
+    return f"""
+Revise this plan to follow the author's feedback. Change what the feedback asks
+for (and what it implies, e.g. pages freed or needed elsewhere); keep the rest.
+Page budget: {budget}
+
+AUTHOR'S FEEDBACK:
+{feedback}
+
+CURRENT PLAN:
+{current_plan}
+
+Literature map of the topic (for reference):
+{landscape}
 """.strip()
 
 
@@ -492,8 +605,13 @@ OUTLINE RULES
 - First decide the STORYLINE: the single throughline that carries the reader
   from the motivating problem to the final results. Every section must be a step
   in it; a section that is not a step in the story is either optional or wrong.
-- Every inventory item id MUST be assigned to at least one section. Nothing may
-  be dropped. Items that repeat across seeds go together (one place, merged).
+- Follow the PLAN: it decides what the tutorial includes and at what level.
+  Every inventory item is either placed in a section or listed under
+  "omitted_items" with a reason. Omit an item only when it belongs to a topic
+  the plan excludes, or is tangential to the plan's scope (e.g. a proof that
+  does not explain how a method works, derivations of general background math,
+  a side remark). Everything that serves the plan is placed, and items that
+  repeat across seeds go together (one place, merged).
 - Order for learning, never by source. The seeds mix setup, solutions, and
   asides in whatever order they happened to use; you choose the most
   educational order: each concept before anything that depends on it; easier
@@ -511,24 +629,19 @@ OUTLINE RULES
   difficulty of the ideas, not to how much the seeds said: where the seeds are
   thin or rushed on an important idea, the plan must spell out every step a
   newcomer needs, because the writer relies on it.
-- Follow the literature map for importance: core topics get core sections;
-  supporting topics are compact (grouped where that helps); brief topics become
-  a few sentences or a table row. Important topics the seeds miss go in as
-  new_material of the section where they belong. The introduction includes a
-  concise overview of the field and its literature (the main families of
-  methods, how they developed, and the key papers), based on the map.
-- For each section, list under "topics" the literature-map topics it covers,
-  using their names exactly as written in the map. Every CORE and SUPPORTING
-  topic must appear in a section — put each where it is actually developed;
-  brief topics go where they are mentioned. Section lengths are computed from
-  the roles of these topics, so the listing decides how the budget is spent.
-- Give each section a "depth": "core" for steps of the main line (full
-  treatment) or "supporting" for variants, refinements, and alternatives
-  (compact but complete, rule 8), and a "target_words" estimate (used only for
-  sections that cover no map topic). Items marked brief become a few sentences
-  or a table row inside a section. Group related variants into one section
-  (with a comparison table) rather than one section per variant, and prefer
-  subsections to separate sections.
+- Main-line entries get core sections with the full treatment; stepping stones
+  are compact but proper (grouped where that helps, e.g. with a comparison
+  table); mentions become a few sentences where they fit. Plan topics the seeds
+  do not cover go in as new_material of the section where they belong. The
+  introduction includes a concise overview of the field and its literature.
+- For each section, list under "topics" the plan entries it covers, using their
+  names exactly as written in the plan. Every main-line and stepping-stone entry
+  must appear in a section — put each where it is actually developed; mentions
+  go where they are mentioned. Section lengths are computed from the plan's
+  pages for these entries.
+- Give each section a "depth" ("core" if it develops a main-line entry, else
+  "supporting") and a "target_words" estimate (used only for sections that
+  cover no plan entry). Prefer subsections to separate sections.
 - The first section is the introduction (role "introduction": the motivating
   problem, what the reader will learn, assumed background, and a roadmap); the
   last is the summary (role "summary": the throughline and key takeaways; it
@@ -538,8 +651,6 @@ OUTLINE RULES
   item uses must be assigned.
 - Fix one notation for the whole tutorial (the "notation" list) and reconcile
   conflicting notation between seeds.
-- Only if the author's brief explicitly asks to leave some material out, list
-  those item ids under "excluded_items" with the reason; otherwise leave it empty.
 - {research}{brief_block(guide)}
 """.strip()
 
@@ -578,15 +689,15 @@ OUTLINE_SCHEMA = {
                     "topics": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Literature-map topics covered here, named exactly as in the map.",
+                        "description": "Plan entries covered here, named exactly as in the plan.",
                     },
                 },
                 "required": ["title", "role", "purpose", "plan", "items", "figures", "depth", "target_words", "topics"],
             },
         },
-        "excluded_items": {
+        "omitted_items": {
             "type": "array",
-            "description": "Only items the author's brief explicitly asks to leave out.",
+            "description": "Items left out: of topics the plan excludes, or tangential to its scope.",
             "items": {
                 "type": "object",
                 "properties": {"id": {"type": "string"}, "reason": {"type": "string"}},
@@ -599,18 +710,17 @@ OUTLINE_SCHEMA = {
 
 
 def outline_user(
-    sources: str, inventory: str, figures: str, title_hint: str | None, budget_words: int, landscape: str
+    sources: str, inventory: str, figures: str, title_hint: str | None, budget_words: int, plan: str
 ) -> str:
     title_line = f"Use this title: {title_hint}" if title_hint else "Propose a precise title."
     return f"""
 {title_line}
 
-Total length budget: about {budget_words} words (≈ {budget_words // 450} pages), to be
-split across the sections via their target_words.
+Total length budget: about {budget_words} words (≈ {budget_words // 450} pages),
+allocated from the plan's pages.
 
-Literature map of the topic (from a survey of the field; use it to decide each
-idea's role, and include the important topics the seeds miss):
-{landscape}
+THE PLAN (what the tutorial includes, at what level, and why):
+{plan}
 
 Seeds:
 {sources}
@@ -626,9 +736,9 @@ Content inventory (id | kind | importance | title | detail):
 def outline_retry_user(previous: str, missing: str, unknown: str, uncovered: str = "", bad_topics: str = "") -> str:
     return f"""
 Your outline did not satisfy the rules. Return the COMPLETE corrected outline.
-{f"These core/supporting topics of the literature map are covered by no section — list each under the section that develops it (adding it there if needed): {uncovered}" if uncovered else ""}
-{f"These section topics are not in the literature map; use the map's exact names: {bad_topics}" if bad_topics else ""}
-{f"These item ids were not assigned to any section — place each where it belongs in the flow: {missing}" if missing else ""}
+{f"These main-line/stepping-stone plan entries are covered by no section — list each under the section that develops it (adding it there if needed): {uncovered}" if uncovered else ""}
+{f"These section topics are not plan entries; use the plan's exact names: {bad_topics}" if bad_topics else ""}
+{f"These item ids are neither placed nor omitted — place each where it belongs, or omit it with a reason if the plan does not need it: {missing}" if missing else ""}
 {f"These ids/figure names do not exist; remove or correct them: {unknown}" if unknown else ""}
 
 Your previous outline:
@@ -663,8 +773,9 @@ WRITING THIS SECTION
 - Where the draft material is thin or rushed on an important idea (because a
   source was), write the missing setup, intuition, and derivation steps
   yourself — you are responsible for the reader understanding it.
-- Write about the section's target length (given in its specification). It is a
-  real budget: spend it on the core of the section, keep supporting material
+- The section's target length (given in its specification) is a CAP: stay at
+  or under it. Each figure, table, or algorithm box counts as about 150 words.
+  Spend the words on what the plan makes main line, keep stepping stones
   compact, and leave out proofs, exhaustive lists, and tangents.
 - Follow the plan's order. Cover the listed new_material where it is needed.
 - Connect to what the reader has just learned and to what comes next in
@@ -774,7 +885,8 @@ Check, and report precisely:
    algorithm boxes, cost analyses) that add little, minor variants developed
    like core methods, or a section well above its target length (say exactly
    what to cut). Judge by what the reader needs, not by what the sources
-   happened to cover.
+   happened to cover. The target is a cap: if you ask for additions, say what
+   to cut so the section stays within it.
 5. Figures: every assigned figure included, captioned, and discussed.
 Read it as the intended reader: could they follow every paragraph with only
 what came before, without other material?
@@ -1033,9 +1145,7 @@ beyond what is strictly required to compile. Never delete a section, paragraph,
 equation, figure, or citation to make an error go away — repair it instead.
 """.strip()
 
-FIX_SYSTEM = (
-    _FIX_RULES
-    + r"""
+_EDIT_FORMAT = r"""
 
 Reply with targeted edits only, as one or more blocks in exactly this format:
 <<<<<<< SEARCH
@@ -1047,6 +1157,21 @@ Each SEARCH text must match the document character for character and occur
 exactly once; include enough surrounding lines to make it unique. Output nothing
 but the edit blocks — no markdown fences, no commentary.
 """
+
+FIX_SYSTEM = _FIX_RULES + _EDIT_FORMAT
+
+LAYOUT_SYSTEM = (
+    r"""
+You fix the layout of a LaTeX document that compiles but has content wider than
+the text width (overfull boxes). You get the offending lines with their source.
+Make each one fit WITHOUT changing its content: break display equations
+(multline, split inside equation, or align/aligned at "=" or "+"), make tables
+fit \linewidth (tabularx with X columns, p{...} columns, \small), break long
+algorithm statements over two lines, and let long URLs, code, or identifiers
+break (\url, \allowbreak, \path). Do not change wording, math, or anything
+else, and never delete content.
+""".strip()
+    + _EDIT_FORMAT
 )
 
 FIX_FULL_SYSTEM = (
@@ -1057,6 +1182,22 @@ Return the ENTIRE corrected document as raw LaTeX only — no markdown fences, n
 commentary.
 """
 )
+
+
+def layout_user(document: str, overflows: str, rejected: str = "") -> str:
+    note = f"\nYour previous fix was rejected: {rejected}\n" if rejected else ""
+    return f"""
+{note}
+Lines wider than the text (overfull boxes), with their source:
+--------------------------------------------------
+{overflows}
+--------------------------------------------------
+
+LaTeX document:
+==================================================
+{document}
+==================================================
+""".strip()
 
 
 def fix_user(document: str, errors: str, log_tail: str, rejected: str = "") -> str:

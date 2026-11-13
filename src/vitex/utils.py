@@ -96,9 +96,13 @@ def run(cmd: Sequence[str], *, desc: str = "") -> str:
 _LATEX_CMD_RE = re.compile(r"\\[A-Za-z@]+\*?|[{}$&^_~\\%]")
 
 
+_LATEX_ENV_RE = re.compile(r"\\(?:begin|end)\{[^}]*\}(?:\[[^\]]*\])?")
+
+
 def word_count(text: str) -> int:
-    """Approximate prose word count of plain text or LaTeX (commands ignored)."""
-    return len(_LATEX_CMD_RE.sub(" ", text).split())
+    """Approximate prose word count of plain text or LaTeX (commands and
+    environment names ignored)."""
+    return len(_LATEX_CMD_RE.sub(" ", _LATEX_ENV_RE.sub(" ", text)).split())
 
 
 def safe_stem(text: str, fallback: str = "tutorial") -> str:

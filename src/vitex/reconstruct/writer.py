@@ -65,8 +65,8 @@ log = logging.getLogger("vitex")
 
 _MATERIAL_CHARS = 320_000  # cap on draft material per section prompt (~80k tokens)
 _MIN_KEPT_FRACTION = 0.85  # a review revision shorter than this share is rejected...
-_OVER_BUDGET = 1.3  # ...unless the section is this far over its target: then it may be
-_FLOOR_OF_TARGET = 0.7  # cut, but not below this share of the target or half its length
+_OVER_BUDGET = 1.15  # ...unless the section is this far over its target: then it may be
+_FLOOR_OF_TARGET = 0.7  # cut, but not below this share of the target (stops a collapsed reply)
 _UNDER_BUDGET = 0.5  # a section below this share of its target is flagged
 # Editorial fixes may remove repetition, so they may shrink a section more; the
 # removed material exists elsewhere by construction.
@@ -92,8 +92,17 @@ def _items_text(items: list[Item]) -> str:
     return "\n".join(f"- {i.id} | {i.kind} | {i.importance} | {i.title}\n    {i.detail.strip()}" for i in items)
 
 
+_FLOAT_WORDS = 150  # page space of a figure, table, or algorithm box, in words
+
+
+def effective_words(latex: str) -> int:
+    """Words plus the page space of floats, comparable to a word target."""
+    floats = sum(latex.count(f"\\begin{{{env}}}") for env in ("figure", "table", "algorithm"))
+    return word_count(latex) + _FLOAT_WORDS * floats
+
+
 def length_note(latex: str, target: int) -> str:
-    words = word_count(latex)
+    words = effective_words(latex)
     if target <= 0:
         return f"{words} words (no target)"
     return f"{words} words against a target of about {target} ({100 * words / target:.0f}%)"
@@ -103,7 +112,7 @@ def min_kept_words(before_words: int, target: int) -> float:
     """Shortest acceptable revision: revisions may not drop content, except that
     a section well over its target may be cut back toward it."""
     if target > 0 and before_words > _OVER_BUDGET * target:
-        return max(_FLOOR_OF_TARGET * target, 0.5 * before_words)
+        return _FLOOR_OF_TARGET * target
     return _MIN_KEPT_FRACTION * before_words
 
 
@@ -180,7 +189,7 @@ def section_jobs(
 
 def mechanical_checks(latex: str, section: Section, known_figures: set[str]) -> list[str]:
     """Problems detectable in code, reported to the reviewer and reviser."""
-    words, target = word_count(latex), section.target_words
+    words, target = effective_words(latex), section.target_words
     problems: list[str] = []
     if target > 0 and words > _OVER_BUDGET * target:
         problems.append(
@@ -247,9 +256,9 @@ def _review_and_revise(
                 cfg.generation_attempts,
             )
         revised = without_sentinel(revised, SECTION_END)
-        if word_count(revised) < min_kept_words(word_count(latex), section.target_words):
+        if effective_words(revised) < min_kept_words(effective_words(latex), section.target_words):
             log.warning("%s: revision %d cut %.0f%% of the text, more than allowed; keeping the previous version",
-                        job.what, rnd, 100 * (1 - word_count(revised) / max(1, word_count(latex))))
+                        job.what, rnd, 100 * (1 - effective_words(revised) / max(1, effective_words(latex))))
             report["rounds"][-1]["revision_rejected"] = True
             continue
         latex = revised
@@ -260,6 +269,36 @@ def _review_and_revise(
     report["approved"] = False
     log.warning("%s: not fully approved after %d review round(s); see coverage.json", job.what, cfg.review_rounds)
     return latex, report
+
+
+def _condense(client: ClaudeClient, cfg: Config, job: SectionJob, latex: str) -> str:
+    """Bring a first version that is well over its target back toward it."""
+    target, words = job.section.target_words, effective_words(latex)
+    if target <= 0 or words <= _OVER_BUDGET * target:
+        return latex
+    log.info("%s: first version is %d words against a target of %d; condensing", job.what, words, target)
+    notes = (
+        f"- CHECK: the section is {words} words (figures, tables, and algorithms count ~{_FLOAT_WORDS} each) "
+        f"against a target of {target}. Condense it to about {target}: cut what teaches least first "
+        "(proofs, tangents, repetition, extra examples, over-developed minor points), keep the key "
+        "derivations, and keep every assigned item at its level."
+    )
+    with staged(client, f"{job.label} condense"):
+        condensed = generate_valid(
+            lambda: generate(
+                client, cfg, system=revise_system(cfg.ground, cfg.guide),
+                text=revise_user(section_request=job.request, section=latex, review=notes),
+                images=image_refs(job.figures),
+            ),
+            lambda t: check_fragment(t, SECTION_END),
+            f"{job.what} condense",
+            cfg.generation_attempts,
+        )
+    condensed = without_sentinel(condensed, SECTION_END)
+    if effective_words(condensed) < min_kept_words(words, target):
+        log.warning("%s: condensing cut too much; keeping the first version", job.what)
+        return latex
+    return condensed
 
 
 def write_sections(
@@ -299,6 +338,7 @@ def write_sections(
                     cfg.generation_attempts,
                 )
             latex = without_sentinel(latex, SECTION_END)
+            latex = _condense(client, cfg, job, latex)
             write_cached(first_cache, first_key, latex)
         latex, report = _review_and_revise(client, cfg, job, latex, known_figures)
         write_cached(cache, key, latex)

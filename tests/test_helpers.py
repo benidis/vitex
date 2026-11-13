@@ -55,11 +55,15 @@ def test_authors_brief_reaches_every_writing_prompt():
     from vitex.llm.prompts import outline_system, review_system, revise_system, section_system
 
     brief = "Focus on policy-gradient derivations."
+    from vitex.llm.prompts import plan_system
+
     for build in (draft_system, outline_system, section_system, review_system, revise_system):
         assert brief in build(True, brief)
         assert "AUTHOR'S BRIEF" not in build(True, None)
+    assert brief in plan_system(brief)
     text = section_system(True)
-    assert "Depth follows the idea's ROLE" in text and "do not\n   prove them" in text
+    flat = " ".join(text.split())
+    assert "Depth follows the idea's LEVEL" in flat and "do not prove them unless" in flat
     assert "Length is never a concern" not in text
 
 

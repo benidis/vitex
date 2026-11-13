@@ -162,3 +162,25 @@ def test_effort_is_sent_for_the_main_model_only():
     client._create(model="main", max_tokens=10, system="s", messages=msgs)
     client._create(model="haiku", max_tokens=10, system="s", messages=msgs)
     assert seen[0]["output_config"] == {"effort": "high"} and "output_config" not in seen[1]
+
+
+def test_rotating_credential_403_is_retried_but_access_denied_is_not():
+    from vitex.llm.client import _is_retryable
+
+    invalid = _status_error(anthropic.PermissionDeniedError, 403)
+    invalid.message = "The security token included in the request is invalid."
+    invalid.args = (invalid.message,)
+    denied = _status_error(anthropic.PermissionDeniedError, 403)
+    denied.args = ("User is not authorized to perform: bedrock:InvokeModel",)
+    assert _is_retryable(invalid) and not _is_retryable(denied)
+
+
+def test_research_results_are_capped():
+    from vitex.llm import research
+
+    research._DISPATCH["fake_big"] = lambda **kw: "x" * 200_000
+    try:
+        out = research.dispatch("fake_big", {})
+    finally:
+        del research._DISPATCH["fake_big"]
+    assert len(out) < 21_000 and out.endswith("[... truncated]")

@@ -38,6 +38,8 @@ log = logging.getLogger("vitex")
 _UA = "Mozilla/5.0 (compatible; vitex/0.1; +https://example.invalid/vitex)"
 _TIMEOUT = 20
 _MAX_BYTES = 2_000_000  # cap on any single response body
+_MAX_AUTHORS = 8
+_MAX_RESULT_CHARS = 20_000  # cap on what one tool call returns to the model
 
 
 class UnsafeURLError(ValueError):
@@ -127,6 +129,8 @@ def arxiv_search(query: str, max_results: int = 5) -> str:
             (a.findtext("a:name", default="", namespaces=_ATOM) or "").strip()
             for a in e.findall("a:author", _ATOM)
         ]
+        if len(authors) > _MAX_AUTHORS:  # collaboration papers list hundreds
+            authors = authors[:_MAX_AUTHORS] + [f"... ({len(authors)} authors)"]
         arxiv_id = abs_url.rsplit("/abs/", 1)[-1] if "/abs/" in abs_url else abs_url
         entries.append(
             {
@@ -276,7 +280,8 @@ def dispatch(name: str, tool_input: dict) -> str:
     if fn is None:
         return f"Unknown tool: {name!r}"
     try:
-        return fn(**tool_input)
+        out = fn(**tool_input)
+        return out if len(out) <= _MAX_RESULT_CHARS else out[:_MAX_RESULT_CHARS] + "\n[... truncated]"
     except TypeError as exc:
         return f"Bad arguments for {name!r}: {exc}"
     except Exception as exc:  # noqa: BLE001 - tools must not crash the run

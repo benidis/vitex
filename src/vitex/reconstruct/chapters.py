@@ -158,12 +158,12 @@ def image_refs(figures: list[Figure]) -> list[ImageRef]:
     return [ImageRef(path=f.path, label=f.name, caption_hint=f.hint) for f in figures if viewable(f)]
 
 
-def draft_seeds(client: ClaudeClient, units: list[SeedUnit], cfg: Config) -> dict[str, str]:
+def draft_seeds(client: ClaudeClient, units: list[SeedUnit], cfg: Config, scope: str = "") -> dict[str, str]:
     """Produce (and cache) the fact-checked LaTeX draft of every seed unit.
 
     Units are independent, so they are drafted ``cfg.parallel`` at a time.
     """
-    cache_dir = cfg.workdir / "drafts"
+    cache_dir = cfg.run_dir / "drafts"
     system = draft_system(cfg.ground, cfg.guide)
 
     def one(n: int) -> str:
@@ -177,6 +177,7 @@ def draft_seeds(client: ClaudeClient, units: list[SeedUnit], cfg: Config) -> dic
             figure_lines=figure_lines(unit.figures),
             visual_notes=unit.visual_notes,
             target_words=max(500, round(_DRAFT_EXPANSION * word_count(unit.text))),
+            scope=scope,
         )
         cache = cache_dir / f"{unit.id}.tex"
         key = pass_key(cfg, "draft", system, user, [f.name for f in unit.figures])

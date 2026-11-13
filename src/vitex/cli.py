@@ -44,9 +44,24 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument(
         "--name",
-        help="Output directory and file name: <outdir>/<name>/<name>.{tex,pdf} "
-        "(default: the title, made filesystem-safe).",
+        help="The tutorial's identity: its work dir work/runs/<name>/ and output "
+        "<outdir>/<name>/<name>.{tex,pdf} (default: the title, else the first source).",
     )
+    run.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="Stop after writing the plan (work/runs/<name>/plan.md) for review or editing.",
+    )
+    run.add_argument(
+        "--plan",
+        dest="plan_path",
+        type=Path,
+        help="Use exactly this plan file (e.g. an edited plan.md) and write the tutorial.",
+    )
+    feedback = run.add_mutually_exclusive_group()
+    feedback.add_argument("--plan-feedback", help="Revise the current plan following these notes.")
+    feedback.add_argument("--plan-feedback-file", type=Path, help="Read plan feedback from a file.")
+    run.add_argument("--replan", action="store_true", help="Make a fresh plan instead of reusing the saved one.")
     guide = run.add_mutually_exclusive_group()
     guide.add_argument(
         "--guide",
@@ -142,6 +157,10 @@ def _config_from_args(args: argparse.Namespace) -> Config:
     overrides = {
         "title": args.title,
         "name": args.name,
+        "plan_path": args.plan_path,
+        "plan_feedback": (
+            args.plan_feedback_file.read_text(encoding="utf-8") if args.plan_feedback_file else args.plan_feedback
+        ),
         "guide": args.guide_file.read_text(encoding="utf-8") if args.guide_file else args.guide,
         "triage_model": args.triage_model,
         "min_frame_value": args.min_frame_value,
@@ -171,6 +190,8 @@ def _config_from_args(args: argparse.Namespace) -> Config:
     if args.ground is not None:  # only override env/.env when a flag was passed
         cfg.ground = args.ground
     cfg.force = args.force
+    cfg.plan_only = args.plan_only
+    cfg.replan = args.replan
     cfg.verbose = args.verbose
     cfg.__post_init__()  # re-coerce Path fields after overrides
     return cfg
@@ -191,11 +212,13 @@ def main(argv: list[str] | None = None) -> int:
         return 130
 
     print("\n" + "=" * 60)
-    print(f"LaTeX : {result.tex_path}")
-    if result.pdf_path:
-        print(f"PDF   : {result.pdf_path}")
+    print(f"Plan  : {result.plan_path}")
+    if result.tex_path is None:
+        print("Next  : edit the plan, or revise it with --plan-only --plan-feedback \"...\";")
+        print("        then rerun without --plan-only to write the tutorial.")
     else:
-        print("PDF   : skipped (--no-pdf)")
+        print(f"LaTeX : {result.tex_path}")
+        print(f"PDF   : {result.pdf_path}" if result.pdf_path else "PDF   : skipped (--no-pdf)")
     print("=" * 60)
     return 0
 

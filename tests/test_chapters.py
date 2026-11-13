@@ -27,7 +27,7 @@ def _unit():
 
 
 def _cfg(tmp_path, **kw):
-    return Config(workdir=tmp_path, ground=False, **kw)
+    return Config(name="t", workdir=tmp_path, ground=False, **kw)
 
 
 def test_empty_draft_is_retried_and_sentinel_stripped(tmp_path):
@@ -41,7 +41,7 @@ def test_truncated_draft_without_sentinel_is_rejected(tmp_path):
     client = FakeClient(["\\section{A}\ncut mid-sente", "\\section{A}\nstill cut", "\\section{A}\nagain"])
     with pytest.raises(LLMError, match="truncated"):
         draft_seeds(client, [_unit()], _cfg(tmp_path))
-    assert not (tmp_path / "drafts" / "u1.tex").exists()
+    assert not (tmp_path / "runs" / "t" / "drafts" / "u1.tex").exists()
 
 
 def test_cached_draft_reused_only_for_identical_inputs(tmp_path):

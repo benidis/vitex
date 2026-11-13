@@ -56,7 +56,7 @@ class OutlineClient:
 def test_build_outline_retries_with_the_missing_ids(tmp_path):
     units = [SeedUnit(id=u, kind="video", source_title="V", position="p", text="t") for u in ("u1", "u2")]
     client = OutlineClient()
-    outline = build_outline(client, units, _items(), {}, [], Config(workdir=tmp_path, ground=False), 5000)
+    outline = build_outline(client, units, _items(), {}, [], Config(name="t", workdir=tmp_path, ground=False), 5000)
     assert outline.sections[0].items == ["I1.01", "I1.02", "I2.01"]
     assert len(client.calls) == 2 and "I2.01" in client.calls[1]
 
@@ -87,7 +87,7 @@ def _write(tmp_path, client, rounds=2):
     outline = Outline(title="T", reader_background="b", notation=[],
                       sections=[_sec("Body", "core", ["I1.01", "I1.02"])])
     units = [SeedUnit(id="u1", kind="video", source_title="V", position="p", text="t")]
-    cfg = Config(workdir=tmp_path, ground=False, review_rounds=rounds)
+    cfg = Config(name="t", workdir=tmp_path, ground=False, review_rounds=rounds)
     jobs = section_jobs(outline, _items(), {"u1": "draft"}, units, {})
     return write_sections(client, jobs, {}, cfg)
 
@@ -97,7 +97,7 @@ def test_review_loop_revises_until_approved(tmp_path):
     [section] = _write(tmp_path, client)
     assert "revised" in section and client.reviews == 2
     assert SECTION_END not in section
-    assert (tmp_path / "tutorial" / "coverage.json").exists()
+    assert (tmp_path / "runs" / "t" / "coverage.json").exists()
 
 
 def test_revision_that_drops_text_is_rejected(tmp_path):
@@ -105,31 +105,21 @@ def test_revision_that_drops_text_is_rejected(tmp_path):
     assert "original body" in section and "short" not in section
 
 
-class ExcludingClient:
-    """Outline that leaves I2.01 out, citing the author's brief."""
+class OmittingClient:
+    """Outline that places I1.* and omits I2.01 with a reason."""
 
     def complete_structured(self, **kw):
         return {"title": "T", "storyline": "s", "reader_background": "b", "notation": [], "sections": [
-            {"title": "Body", "role": "core", "question": "q", "motivation": "m", "plan": ["p"],
-             "items": ["I1.01", "I1.02"], "figures": [], "leads_to": "l"}],
-            "excluded_items": [{"id": "I2.01", "reason": "brief excludes caching"}]}
+            {"title": "Body", "role": "core", "purpose": "p", "plan": ["p"], "items": ["I1.01", "I1.02"],
+             "figures": [], "topics": []}],
+            "omitted_items": [{"id": "I2.01", "reason": "belongs to a topic the plan excludes"}]}
 
 
-def _outline_with(tmp_path, guide):
+def test_items_can_be_omitted_with_a_reason(tmp_path):
     units = [SeedUnit(id=u, kind="video", source_title="V", position="p", text="t") for u in ("u1", "u2")]
-    cfg = Config(workdir=tmp_path, ground=False, guide=guide)
-    return build_outline(ExcludingClient(), units, _items(), {}, [], cfg, 5000)
-
-
-def test_exclusion_is_honored_only_with_an_authors_brief(tmp_path):
-    with_brief = _outline_with(tmp_path / "a", "Skip KV caching entirely.")
-    assert [e["id"] for e in with_brief.excluded] == ["I2.01"]
-    assert "I2.01" not in with_brief.sections[0].items
-    assert with_brief.storyline == "s" and "Storyline: s" in with_brief.overview()
-
-    without = _outline_with(tmp_path / "b", None)
-    assert without.excluded == []
-    assert "I2.01" in without.sections[0].items  # restored and attached in code
+    outline = build_outline(OmittingClient(), units, _items(), {}, [], Config(name="t", workdir=tmp_path, ground=False), 5000)
+    assert [e["id"] for e in outline.omitted] == ["I2.01"]
+    assert all("I2.01" not in s.items for s in outline.sections)  # omitted, not force-attached
 
 
 def test_run_parallel_keeps_order_and_finishes_all_before_raising():
@@ -198,7 +188,7 @@ def test_sections_are_written_in_parallel_with_neighbor_plans(tmp_path):
         _sec("Intro", "introduction", []), _sec("Body", "core", ["I1.01", "I1.02"]), _sec("Summary", "summary", []),
     ])
     units = [SeedUnit(id="u1", kind="video", source_title="V", position="p", text="t")]
-    cfg = Config(workdir=tmp_path, ground=False, review_rounds=1, parallel=3)
+    cfg = Config(name="t", workdir=tmp_path, ground=False, review_rounds=1, parallel=3)
     client = ParallelWriterClient()
     jobs = section_jobs(outline, _items(), {"u1": "draft \\cite{vaswani2017attention}"}, units, {})
     written = write_sections(client, jobs, {}, cfg)
@@ -249,7 +239,7 @@ def _edit(tmp_path, client):
                       sections=[_sec("Intro", "introduction", ["I1.01"]), _sec("Body", "core", ["I1.02"])])
     units = [SeedUnit(id="u1", kind="video", source_title="V", position="p", text="t")]
     jobs = section_jobs(outline, _items(), {"u1": "draft"}, units, {})
-    cfg = Config(workdir=tmp_path, ground=False, editorial_rounds=2)
+    cfg = Config(name="t", workdir=tmp_path, ground=False, editorial_rounds=2)
     sections = ["\\section{Intro}\nAttention defined here.", "\\section{Body}\n" + "Attention is explained again. " * 10]
     return edit_tutorial(client, outline, _items(), sections, jobs, cfg), sections
 
@@ -265,7 +255,7 @@ def test_editor_reads_the_whole_and_fixes_the_flagged_sections(tmp_path):
     assert len(client.fix_requests) == 1
     fix = client.fix_requests[0]
     assert "re-explains attention" in fix and "SECTION 1: Intro" in fix  # related section text included
-    report = _json.loads((tmp_path / "tutorial" / "editorial.json").read_text())
+    report = _json.loads((tmp_path / "runs" / "t" / "editorial.json").read_text())
     assert report[0]["revised"] == [2] and report[1]["issues"] == []
 
 
@@ -297,28 +287,57 @@ def test_length_checks_and_shrink_guard():
     assert any("far below" in c for c in mechanical_checks("\\section{A} short", sec, set()))
     # Normal revisions may not cut more than 15%; an over-long section may be cut toward its target.
     assert min_kept_words(1000, 1000) == 850
-    assert min_kept_words(2000, 1000) == 1000  # max(0.7 * target, half of current)
+    assert min_kept_words(2000, 1000) == 700  # over budget: may be cut down to 70% of the target
 
 
-def test_allocation_follows_topic_roles_and_coverage_is_enforced():
+def test_allocation_follows_plan_pages_and_coverage_is_enforced():
     from vitex.reconstruct.outline import allocate, topic_problems
 
-    topics = [{"topic": "PPO", "role": "core"}, {"topic": "TRPO", "role": "core"},
-              {"topic": "A2C", "role": "supporting"}, {"topic": "Noisy Nets", "role": "brief"}]
+    entries = [{"name": "PPO", "level": "main", "pages": 5}, {"name": "TRPO", "level": "main", "pages": 3},
+               {"name": "A2C", "level": "stepping", "pages": 1}, {"name": "Noisy Nets", "level": "mention", "pages": 0},
+               {"name": "C51", "level": "excluded", "pages": 0}]
     outline = Outline(title="T", reader_background="b", notation=[], sections=[
-        _sec("Intro", "introduction", []), _sec("PPO", "core", []), _sec("Variants", "core", []),
+        _sec("Intro", "introduction", []), _sec("PPO", "core", []), _sec("Variants", "supporting", []),
         _sec("Summary", "summary", []),
     ])
     outline.sections[1].topics = ["ppo", "TRPO"]  # names match case-insensitively
     outline.sections[2].topics = ["A2C", "Noisy Nets", "Made Up"]
-    assert topic_problems(outline, topics) == ([], ["Made Up"])
+    assert topic_problems(outline, entries) == ([], ["Made Up"])
     outline.sections[1].topics = ["PPO"]
-    assert topic_problems(outline, topics)[0] == ["TRPO"]  # uncovered core topic -> outline retried
+    assert topic_problems(outline, entries)[0] == ["TRPO"]  # uncovered main entry -> outline retried
     outline.sections[1].topics = ["PPO", "TRPO"]
 
-    lines = allocate(outline, topics, 10000)
-    intro, core, variants, summary = (s.target_words for s in outline.sections)
-    assert (intro, summary) == (500, 400)  # fixed frame shares
-    assert core > 3 * variants  # two core topics vs one supporting + one brief
-    assert abs(sum((intro, core, variants, summary)) - 10000) <= 2
+    lines = allocate(outline, entries, 10000, frame_words=1000)
+    intro, main, variants, summary = (s.target_words for s in outline.sections)
+    assert (intro, summary) == (550, 450)  # the frame is split 55/45
+    assert abs(main / variants - 8 / 1.15) < 0.2  # 8 plan pages vs 1 page + a mention
+    assert abs(sum((intro, main, variants, summary)) - 10000) <= 2
     assert any("Allocation of 10000 words" in line for line in lines)
+
+
+def test_over_long_first_version_is_condensed_before_review(tmp_path):
+    from vitex.reconstruct.writer import effective_words
+
+    class CondenseClient:
+        def __init__(self):
+            self.condense_requests = 0
+
+        def complete(self, *, text, **kw):
+            if "Condense it to about" in text:
+                self.condense_requests += 1
+                return f"\\section{{Body}}\n{'tight ' * 450}\n{SECTION_END}"
+            return f"\\section{{Body}}\n{'wordy ' * 1500}\n{SECTION_END}"
+
+        complete_with_tools = complete
+
+        def complete_structured(self, **kw):
+            return {"approved": True, "missing_items": [], "issues": []}
+
+    outline = Outline(title="T", reader_background="b", notation=[], sections=[_sec("Body", "core", ["I1.01"])])
+    outline.sections[0].target_words = 500
+    units = [SeedUnit(id="u1", kind="video", source_title="V", position="p", text="t")]
+    jobs = section_jobs(outline, _items(), {"u1": "draft"}, units, {})
+    client = CondenseClient()
+    [section] = write_sections(client, jobs, {}, Config(name="t", workdir=tmp_path, ground=False, review_rounds=1))
+    assert client.condense_requests == 1 and "tight" in section and "wordy" not in section
+    assert effective_words("\\begin{figure}x\\end{figure} a b") == 150 + 3

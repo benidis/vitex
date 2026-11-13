@@ -24,7 +24,7 @@ from vitex.llm.client import ClaudeClient, staged
 from vitex.llm.prompts import SURVEY_SCHEMA, survey_system, survey_user
 from vitex.models import SeedUnit
 from vitex.reconstruct.chapters import dump, generate_structured, pass_key, structured_valid
-from vitex.reconstruct.outline import ROLE_WORDS, Item
+from vitex.reconstruct.outline import ROLE_WORDS, WORDS_PER_PAGE
 from vitex.utils import read_cached, write_cached
 
 log = logging.getLogger("vitex")
@@ -35,7 +35,6 @@ log = logging.getLogger("vitex")
 # an example) in a few pages.
 WORDS_PER_TOPIC = ROLE_WORDS
 _FRAME_WORDS = 3000  # introduction (with the overview of the field) + summary
-WORDS_PER_PAGE = 450
 
 
 @dataclass
@@ -61,18 +60,24 @@ class Survey:
         return _FRAME_WORDS + sum(WORDS_PER_TOPIC.get(t.get("role", "brief"), 0) for t in self.topics)
 
 
-def build_survey(
-    client: ClaudeClient,
-    units: list[SeedUnit],
-    items: list[Item],
-    summaries: dict[str, str],
-    cfg: Config,
-) -> Survey:
-    """Map the topic with research; cached at ``work/tutorial/survey.json``."""
-    sources = "\n".join(f"- {u.kind} \"{u.source_title}\", {u.position}: {summaries.get(u.id, '')}" for u in units)
-    titles = sorted({i.title for i in items})
+_SEED_CHARS = 20_000  # per seed unit in the survey prompt
+_NOTES_CHARS = 4_000  # on-screen notes per video unit
+
+
+def _seeds_text(units: list[SeedUnit]) -> str:
+    blocks = []
+    for u in units:
+        text = u.text if len(u.text) <= _SEED_CHARS else u.text[:_SEED_CHARS] + "\n[...]"
+        notes = f"\nOn screen:\n{u.visual_notes[:_NOTES_CHARS]}" if u.visual_notes else ""
+        blocks.append(f"=== {u.kind} \"{u.source_title}\", {u.position} ===\n{text}{notes}")
+    return "\n\n".join(blocks)
+
+
+def build_survey(client: ClaudeClient, units: list[SeedUnit], cfg: Config) -> Survey:
+    """Map the topic with research, from the seeds themselves (before drafting,
+    so planning is quick); cached in the run dir."""
     system = survey_system(cfg.ground, cfg.guide)
-    user = survey_user(cfg.title, sources, "; ".join(titles))
+    user = survey_user(cfg.title, _seeds_text(units))
     cache = cfg.tutorial_dir / "survey.json"
     key = pass_key(cfg, "survey", system, user)
     cached = read_cached(cache, key, cfg.force)

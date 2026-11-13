@@ -164,13 +164,22 @@ def _conforming(out: dict, schema: dict) -> dict:
         raise LLMError(f"Structured answer does not match its schema: {exc}") from exc
 
 
+# 403s that mean "credentials need refreshing", not "access denied": temporary
+# AWS credentials (e.g. from a credential_process) can be momentarily invalid
+# while they rotate.
+_TRANSIENT_AUTH = ("security token included in the request is invalid", "expiredtoken", "token is expired")
+
+
 def _is_retryable(exc: Exception) -> bool:
-    """True for transient failures (throttling, 5xx, network); False otherwise."""
+    """True for transient failures (throttling, 5xx, network, rotating
+    credentials); False otherwise."""
     import anthropic
 
     if isinstance(exc, anthropic.APIConnectionError):  # includes APITimeoutError
         return True
     if isinstance(exc, anthropic.APIStatusError):
+        if exc.status_code == 403 and any(m in str(exc).lower() for m in _TRANSIENT_AUTH):
+            return True
         return exc.status_code in _RETRYABLE_STATUS or exc.status_code >= 500
     return False
 
@@ -325,6 +334,19 @@ class ClaudeClient:
         from anthropic import Anthropic
 
         return Anthropic(api_key=cfg.anthropic_api_key, max_retries=0)
+
+    def check_access(self) -> None:
+        """One tiny request before any parallel work.
+
+        It resolves the credentials once (the SDK loads them lazily, and many
+        threads doing that at once can race — with a credential_process some
+        get an invalid token) and fails fast on a wrong profile or missing
+        model access, before an expensive run starts.
+        """
+        with self.stage("access check"):
+            self.complete(system="Reply with the single word: ok", text="ping", max_tokens=64)
+        log.info("Claude access OK (%s, model %s)",
+                 f"profile {self.cfg.aws_profile}" if self.cfg.provider == "bedrock" else "Anthropic API", self.model)
 
     # -- request building ---------------------------------------------------
 
