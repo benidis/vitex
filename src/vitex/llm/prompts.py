@@ -32,22 +32,23 @@ topic. Reading front to back, with no other material and without the source
 videos or documents, they must understand all of it.
 1. Problem first. Introduce every idea through the problem it solves, stated in
    terms the reader already understands from earlier material. Set the problem up
-   fully — the setting, what is given, what is wanted, the assumptions, and why
-   the obvious approach falls short — before presenting the solution.
+   — the setting, what is given, what is wanted, and why the obvious approach
+   falls short — before presenting the solution.
 2. Intuition, then formalism. Explain the idea in words (with a concrete example
    or analogy where it helps), then give the precise math, then tie every symbol
    back to the intuition.
-3. No logical jumps. Derive every result step by step, showing each intermediate
-   expression and saying what was done (a substitution, a named identity,
-   linearity of expectation, ...) and why. Never write "it can be shown", "it is
-   easy to see", "after some algebra", and never jump from setup to result.
+3. No logical jumps in what you derive. Derive the key results — the objectives,
+   gradients, and update rules a method is built on — step by step, saying what
+   was done at each step and why; never jump from setup to result. Theorems
+   (convergence guarantees, bounds, optimality results) are stated precisely,
+   with the intuition for why they hold and a citation for the proof; do not
+   prove them.
 4. No assumed knowledge of the topic. Define every term and symbol at its first
-   use: what it is, its type/shape/units, and its role. If a tool from outside
-   the topic is needed (an inequality, a data structure, an optimization trick),
-   explain it briefly where it is first needed.
-5. Nothing out of the blue. Every section and every method appears because the
-   reader now needs it: first make clear the need or limitation, arising from
-   what came before, that motivates it. Never introduce a method just to list it.
+   use. If a tool from outside the topic is needed, explain it briefly where it
+   is first needed.
+5. Nothing out of the blue. Every method appears because the reader now needs
+   it: first make clear the need or limitation, arising from what came before,
+   that motivates it.
 6. Flow. The tutorial reads as one continuous, well-structured text: each part
    follows naturally from what came before, and the reader always knows why the
    current material matters. How a section opens, connects, and closes is
@@ -55,38 +56,53 @@ videos or documents, they must understand all of it.
    sections around it. A motivating question, a short signpost, or a brief recap
    is fine where it genuinely helps the reader; none is required, and none is
    applied as a template. Use one consistent notation throughout.
-7. Concrete. Use worked examples with actual numbers or small cases; walk through
-   algorithms on a small input; make shapes and sizes explicit.
-8. Depth follows difficulty, NOT the source. You are responsible for the reader
-   understanding every idea, however well or badly a source explained it. Judge
-   each idea by what a newcomer needs to truly understand it — never by how many
-   minutes a video spent on it or how many lines a document gave it. When a
-   source mentions something in passing, rushes through it, skips steps, or
-   explains it poorly, supply the full treatment yourself: the problem setup,
-   the intuition, every derivation step, and a worked example. A short paragraph
-   on a substantial idea is a failure, even if that is all the source offered.
-9. Build up. Easier before harder, concrete before abstract, the special case
+7. Build up. Easier before harder, concrete before abstract, the special case
    before the general one. Where it teaches best, follow the arc: the problem,
    the natural first attempt, exactly why it falls short, then the better
-   solution. Every new idea rests only on what the reader already has.
-10. Detail over brevity. When in doubt, explain more. Length is never a concern;
-   gaps in understanding are. The test for every paragraph: could the reader
-   follow it with only what came before?
+   solution.
+8. Depth follows the idea's ROLE and difficulty — not the source, and not "as
+   much as possible". You are responsible for the reader understanding every
+   idea, however well or badly a source explained it, and for spending the
+   reader's time where it matters:
+   - CORE ideas (the main line of the storyline): the full treatment — problem
+     setup, intuition, the key derivation step by step, and, where they teach,
+     the algorithm, cost analysis, and a worked example.
+   - SUPPORTING ideas (variants, refinements, alternatives): compact but
+     complete — which problem of the base method they address, the idea, the key
+     equation(s) and what changes relative to the base method (derived briefly),
+     how they are used in practice, and the trade-off. The reader must follow the
+     why and the how; a one-line mention is not enough. Usually a page or two.
+   - BRIEF ideas (context, passing mentions, historical notes): a few sentences
+     or a row in a comparison table, with a citation.
+   A source's brevity is never a reason to under-explain a core idea; a source's
+   length is never a reason to over-explain a minor one.
+9. Use extras where they teach, not by default:
+   - an algorithm box (pseudocode as it is run in practice) for core methods,
+     and for variants whose procedure differs materially;
+   - a cost/complexity analysis where cost is what motivates the next idea or
+     drives the choice between methods;
+   - a worked numerical example where a mechanism is not obvious from the
+     equations — not one per method;
+   - a comparison table to set related variants side by side.
+10. Economy. Every paragraph must earn its place: complete on what matters,
+   concise everywhere else. No repetition, no exhaustive enumerations, no
+   tangents, no proofs. Respect the length target you are given; when a section
+   is over it, cut what teaches least first.
 """.strip()
 
 SEED_RULES = r"""
 HOW TO TREAT THE SOURCES
-The videos and documents are SEEDS, not the product. The result must be more
-complete, more detailed, and more correct than any of them.
-- Keep EVERYTHING of substance from every seed: every concept, definition,
-  equation, derivation, result, number, example, figure, comparison, caveat, and
-  insight. Nothing a source teaches may be lost or compressed away.
+The videos and documents are SEEDS, not the product. The result must be better
+organized, clearer, and more correct than any of them.
+- Keep every idea of substance from every seed — concepts, definitions, key
+  equations and results, numbers, examples, figures, comparisons, caveats — at
+  the depth its role warrants: a central result keeps its full development, a
+  minor point may become a sentence or a table row. Nothing is silently lost.
 - Fact-check all of it. Where a source is wrong, imprecise, ambiguous, or cut off,
   state the correct version as plain fact (do not tell the reader the source was
   wrong, and never write "the video says") and cite the source of record.
-- Expand: add the motivation, intermediate steps, background, and worked
-  examples the sources skipped. A source's brevity on a point is never a reason
-  for yours.
+- Add the motivation, intermediate steps, and background the sources skipped
+  where the reader needs them.
 - Sources are uneven: fragmentary, out of order, repetitive, rushed in places,
   and mixing setup with solutions. Merge overlapping material into one best
   treatment, fill the gaps, and choose the most educational order and
@@ -105,7 +121,7 @@ AUTHOR'S BRIEF (from the person commissioning this tutorial — follow it)
 
 The brief sets the tutorial's scope, focus, emphasis, audience, and any special
 instructions; where it conflicts with the defaults above, the brief wins. The
-standard for explanation (problem first, no jumps, depth by difficulty, flow)
+standard for explanation (problem first, no jumps, depth by role, flow)
 always applies. Seed content is kept unless the brief explicitly asks to leave
 something out."""
 
@@ -246,10 +262,11 @@ so COMPLETENESS and CORRECTNESS come first: everything the seed teaches must be
 in your draft — verified, corrected where needed, and explained to the standard
 below. Write it as real tutorial prose (not notes), in LaTeX.
 
-The final tutorial can only be as deep as this material. Wherever the seed
-rushes through an idea, only names it, skips steps, or explains it poorly, give
-that idea its full treatment HERE — problem setup, intuition, every derivation
-step, a worked example — sized to its difficulty, not to the seed's coverage.
+The final tutorial can only be as good as this material. Wherever the seed
+rushes through an important idea, only names it, skips steps, or explains it
+poorly, give that idea the treatment its role warrants HERE (rule 8) — sized to
+its role and difficulty, not to the seed's coverage, and not inflated. Respect
+the length target given with the seed.
 
 {TUTORIAL_STANDARD}
 
@@ -283,6 +300,7 @@ def draft_user(
     text: str,
     figure_lines: str,
     visual_notes: str,
+    target_words: int,
 ) -> str:
     if kind == "video":
         intro = (
@@ -303,6 +321,9 @@ def draft_user(
     timeline = f"\nOn-screen timeline (vision-model transcription; verify):\n{visual_notes}\n" if visual_notes else ""
     return f"""
 {intro}
+
+Length target for this draft: about {target_words} words (more only where a core
+idea needs it; less where the seed is padded or repetitive).
 
 Figures attached (use these exact file names):
 {figures}
@@ -333,6 +354,8 @@ A typical draft yields 15-60 items. For each item give:
   the steps of a derivation, the specifics of an example
 - figures: file names of figures (\includegraphics) this item uses, if any
 - depends_on: titles of other items in this list it builds on, if any
+- importance: core (on the main line of the topic) | supporting (a variant,
+  refinement, or alternative) | brief (context or a passing remark)
 """.strip()
 
 INVENTORY_SCHEMA = {
@@ -349,6 +372,7 @@ INVENTORY_SCHEMA = {
                     "detail": {"type": "string"},
                     "figures": {"type": "array", "items": {"type": "string"}},
                     "depends_on": {"type": "array", "items": {"type": "string"}},
+                    "importance": {"type": "string", "enum": ["core", "supporting", "brief"]},
                 },
                 "required": ["kind", "title", "detail"],
             },
@@ -365,6 +389,79 @@ Draft from "{source_title}", {position}. List every item of content in it.
 ==================================================
 {draft}
 ==================================================
+""".strip()
+
+
+# ---------------------------------------------------------------------------
+# Pass 2b: survey — map the topic itself (literature review), not just the seeds
+# ---------------------------------------------------------------------------
+
+
+def survey_system(ground: bool, guide: str | None = None) -> str:
+    research = (
+        "Use the research tools to ground the map in the literature: the papers "
+        "that introduced each method, surveys of the field, and what is used in "
+        "practice today."
+        if ground
+        else "Rely on well-established knowledge of the field."
+    )
+    return f"""
+You are a senior researcher preparing the literature map for a tutorial. You get
+a summary of what the seeds (videos and documents) cover. Map the TOPIC itself,
+not just the seeds: which methods and concepts a learner of this topic must
+understand, how they relate, and how important each one is.
+
+For every topic (a method, concept, or result at the level of a tutorial
+subsection — typically 20 to 60 topics), give:
+- role: "core" if it is on the main line of the field (a learner cannot
+  understand the topic without it, or later key methods build on it);
+  "supporting" if it is a notable variant, refinement, or alternative worth
+  explaining compactly; "brief" if a sentence or a table row is enough
+  (historical, niche, superseded, or rarely used).
+- why: one sentence justifying the role (influence, use in practice, what
+  builds on it).
+- key_refs: the primary paper(s) or standard references.
+- in_seeds: whether the seeds cover it.
+Judge importance by the field, not by how much a seed says about something: a
+seed may dwell on a minor variant or skip a central method. List important
+topics the seeds do not cover. Also write a short overview of the field: its
+main problem, the main families of methods, and how they developed.
+{research}{brief_block(guide)}
+""".strip()
+
+
+SURVEY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "overview": {"type": "string", "description": "A short overview of the field and its literature."},
+        "topics": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string"},
+                    "role": {"type": "string", "enum": ["core", "supporting", "brief"]},
+                    "why": {"type": "string"},
+                    "key_refs": {"type": "array", "items": {"type": "string"}},
+                    "in_seeds": {"type": "boolean"},
+                },
+                "required": ["topic", "role", "why", "in_seeds"],
+            },
+        },
+    },
+    "required": ["overview", "topics"],
+}
+
+
+def survey_user(title: str | None, sources: str, topics: str) -> str:
+    return f"""
+Tutorial: {title or "(title to be decided)"}
+
+Seeds and what each covers:
+{sources}
+
+Topics the seeds' content inventory touches (item titles):
+{topics}
 """.strip()
 
 
@@ -413,8 +510,21 @@ OUTLINE RULES
   enough that a writer can follow it without guessing. Size the plan to the
   difficulty of the ideas, not to how much the seeds said: where the seeds are
   thin or rushed on an important idea, the plan must spell out every step a
-  newcomer needs, because the writer relies on it. Split heavy topics into
-  several sections rather than compressing them.
+  newcomer needs, because the writer relies on it.
+- Follow the literature map for importance: core topics get core sections;
+  supporting topics are compact (grouped where that helps); brief topics become
+  a few sentences or a table row. Important topics the seeds miss go in as
+  new_material of the section where they belong. The introduction includes a
+  concise overview of the field and its literature (the main families of
+  methods, how they developed, and the key papers), based on the map.
+- Give each section a "depth" and a "target_words". Depth is "core" for steps
+  of the main line (full treatment) or "supporting" for variants, refinements,
+  and alternatives (compact but complete, rule 8). The targets must add up to
+  the total length budget given below, allocated by role and difficulty: core
+  sections get most of it. Items marked brief become a few sentences or a table
+  row inside a section. Group related variants into one section (with a
+  comparison table) rather than one section per variant, and prefer subsections
+  to separate sections; most sections should be roughly 1,500-6,000 words.
 - The first section is the introduction (role "introduction": the motivating
   problem, what the reader will learn, assumed background, and a roadmap); the
   last is the summary (role "summary": the throughline and key takeaways; it
@@ -459,8 +569,10 @@ OUTLINE_SCHEMA = {
                     "items": {"type": "array", "items": {"type": "string"}},
                     "new_material": {"type": "array", "items": {"type": "string"}},
                     "figures": {"type": "array", "items": {"type": "string"}},
+                    "depth": {"type": "string", "enum": ["core", "supporting"]},
+                    "target_words": {"type": "integer", "description": "Target length of the section in words."},
                 },
-                "required": ["title", "role", "purpose", "plan", "items", "figures"],
+                "required": ["title", "role", "purpose", "plan", "items", "figures", "depth", "target_words"],
             },
         },
         "excluded_items": {
@@ -477,10 +589,19 @@ OUTLINE_SCHEMA = {
 }
 
 
-def outline_user(sources: str, inventory: str, figures: str, title_hint: str | None) -> str:
+def outline_user(
+    sources: str, inventory: str, figures: str, title_hint: str | None, budget_words: int, landscape: str
+) -> str:
     title_line = f"Use this title: {title_hint}" if title_hint else "Propose a precise title."
     return f"""
 {title_line}
+
+Total length budget: about {budget_words} words (≈ {budget_words // 450} pages), to be
+split across the sections via their target_words.
+
+Literature map of the topic (from a survey of the field; use it to decide each
+idea's role, and include the important topics the seeds miss):
+{landscape}
 
 Seeds:
 {sources}
@@ -488,7 +609,7 @@ Seeds:
 Available figures (name | value 0-10 | description):
 {figures or "(none)"}
 
-Content inventory (id | kind | title | detail):
+Content inventory (id | kind | importance | title | detail):
 {inventory}
 """.strip()
 
@@ -524,13 +645,16 @@ come from, its figures, and the plans of the sections just before and after it.
 {research_rules(ground)}
 
 WRITING THIS SECTION
-- Cover EVERY assigned item completely: all of its equations, derivation steps,
-  numbers, and examples. The draft material is your source; you may improve its
-  explanations, but drop nothing.
-- Explain each idea at the depth its difficulty demands. Where the draft
-  material is thin or rushed (because a source was), write the missing setup,
-  intuition, derivation steps, and examples yourself — you are responsible for
-  the reader understanding it, whatever the sources did.
+- Cover every assigned item at the depth its role warrants (rule 8; the
+  section's depth and each item's importance are given). The draft material is
+  your source: improve its explanations, select what teaches, and drop nothing
+  of substance — but do not reproduce everything a draft elaborates.
+- Where the draft material is thin or rushed on an important idea (because a
+  source was), write the missing setup, intuition, and derivation steps
+  yourself — you are responsible for the reader understanding it.
+- Write about the section's target length (given in its specification). It is a
+  real budget: spend it on the core of the section, keep supporting material
+  compact, and leave out proofs, exhaustive lists, and tangents.
 - Follow the plan's order. Cover the listed new_material where it is needed.
 - Connect to what the reader has just learned and to what comes next in
   whatever way fits this section's purpose — the neighbouring sections' plans
@@ -581,7 +705,7 @@ Notation (use exactly):
 This section:
 {spec}
 
-Items this section must cover completely:
+Items this section must cover (at the depth their role warrants):
 {items or "(none — see the plan)"}
 
 Figures for this section (attached as images; use these exact file names):
@@ -622,8 +746,9 @@ the whole tutorial.
 {TUTORIAL_STANDARD}
 
 Check, and report precisely:
-1. Coverage: every assigned item is present IN FULL (its equations, steps,
-   numbers, examples). List each missing or partial item id and what is missing.
+1. Coverage: every assigned item is present at the depth its role warrants
+   (core items fully developed; supporting items compact but with the why and
+   the how). List each missing or under-explained item id and what is missing.
 2. Rigor: logical jumps, skipped derivation steps, symbols or terms used before
    being defined, methods introduced without motivation, unjustified claims,
    and factual errors. {research}
@@ -632,10 +757,13 @@ Check, and report precisely:
    depend on something not yet covered? Flag openings, transitions, or closings
    that feel forced or templated in this context (e.g. a closing question or
    recap that adds nothing) — not ones that genuinely help the reader.
-4. Depth: any idea explained more briefly or superficially than its difficulty
-   demands — e.g. a short paragraph where the reader needs a problem setup, a
-   step-by-step derivation, or a worked example. Say exactly what to add. Judge
-   by what the reader needs, not by what the sources happened to cover.
+4. Depth and length, in both directions. Under: an important idea explained
+   more briefly than the reader needs (say exactly what to add). Over: proofs of
+   theorems, exhaustive enumerations, tangents, repetition, extras (examples,
+   algorithm boxes, cost analyses) that add little, minor variants developed
+   like core methods, or a section well above its target length (say exactly
+   what to cut). Judge by what the reader needs, not by what the sources
+   happened to cover.
 5. Figures: every assigned figure included, captioned, and discussed.
 Read it as the intended reader: could they follow every paragraph with only
 what came before, without other material?
@@ -673,7 +801,7 @@ REVIEW_SCHEMA = {
 }
 
 
-def review_user(*, overview: str, spec: str, items: str, section: str, checks: str) -> str:
+def review_user(*, overview: str, spec: str, items: str, section: str, checks: str, length: str) -> str:
     return f"""
 Outline of the whole tutorial (the reviewed section is marked >>>):
 {overview}
@@ -681,7 +809,9 @@ Outline of the whole tutorial (the reviewed section is marked >>>):
 Section specification:
 {spec}
 
-Items it must cover completely:
+Length: {length}
+
+Items it must cover (at the depth their role warrants):
 {items or "(none — see the plan)"}
 {f"{chr(10)}Automatic checks already found:{chr(10)}{checks}{chr(10)}" if checks else ""}
 Section to review:
@@ -694,8 +824,11 @@ Section to review:
 def revise_system(ground: bool, guide: str | None = None) -> str:
     return f"""
 You are revising one section of a tutorial to resolve every point of a review.
-Fix each listed problem and add each missing item in full, using the draft
-material. Keep everything else that is correct — do not shorten or drop content.
+Fix each listed problem and add each missing item at the depth its role
+warrants, using the draft material. Keep everything else that is correct. When
+the review asks you to shorten, cut what teaches least — proofs, tangents,
+repetition, extras that add little — and keep the key derivations and every
+assigned item at its depth.
 
 {TUTORIAL_STANDARD}
 
@@ -748,8 +881,8 @@ Look for:
    material that has not appeared yet or appears only later.
 4. Transitions: a section's opening that does not fit what the previous section
    actually says, or a connection that feels forced or templated in context.
-5. Balance: comparable ideas treated at very different depth, or an important
-   idea thin compared with its role in the storyline.
+5. Balance: comparable ideas treated at very different depth, an important
+   idea thin compared with its role, or a minor one inflated far beyond it.
 6. Contradictions between sections, and gaps in the storyline (a step the
    reader needs that no section provides).
 Report only real problems that matter to the reader. For each, give the number

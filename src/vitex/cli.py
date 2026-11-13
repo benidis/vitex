@@ -88,6 +88,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--chunk-minutes", type=float, help="Transcript minutes per video seed unit."
     )
     run.add_argument(
+        "--pages",
+        type=int,
+        help="Target length in pages (default: sized from the topics found by the survey and their roles).",
+    )
+    run.add_argument(
         "--editorial-rounds",
         type=int,
         help="Rounds of whole-tutorial editing after sections are written (default: 2; 0 disables).",
@@ -142,6 +147,7 @@ def _config_from_args(args: argparse.Namespace) -> Config:
         "min_frame_value": args.min_frame_value,
         "review_rounds": args.review_rounds,
         "editorial_rounds": args.editorial_rounds,
+        "pages": args.pages,
         "parallel": args.parallel,
         "outdir": args.outdir,
         "workdir": args.workdir,

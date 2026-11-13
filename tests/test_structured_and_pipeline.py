@@ -10,7 +10,7 @@ from vitex import pipeline as pipeline_mod
 from vitex.config import Config
 from vitex.errors import LLMError
 from vitex.llm.client import ClaudeClient
-from vitex.llm.prompts import EDITORIAL_SCHEMA, INVENTORY_SCHEMA, OUTLINE_SCHEMA, REVIEW_SCHEMA
+from vitex.llm.prompts import EDITORIAL_SCHEMA, INVENTORY_SCHEMA, OUTLINE_SCHEMA, REVIEW_SCHEMA, SURVEY_SCHEMA
 from vitex.output.build import content_losses
 from vitex.pipeline import Pipeline
 
@@ -101,7 +101,14 @@ class ScriptedModel:
         self.calls.append(("json", system[:40]))
         if schema is INVENTORY_SCHEMA:
             return {"summary": "s", "items": [{"kind": "concept", "title": "Attention", "detail": "QK^T"}]}
+        if schema is SURVEY_SCHEMA:
+            return {"overview": "Attention maps queries to keys.", "topics": [
+                {"topic": "Scaled dot-product attention", "role": "core", "why": "everything builds on it", "in_seeds": True},
+                {"topic": "Multi-query attention", "role": "supporting", "why": "cuts the KV cache", "in_seeds": False},
+            ]}
         if schema is OUTLINE_SCHEMA:
+            assert "Multi-query attention [NOT IN SEEDS]" in text  # the survey's map reaches the outline
+            assert "about 6400 words" in text  # budget = 3000 + 2500 (core) + 900 (supporting)
             ids = re.findall(r"^(I\d+\.\d+) \|", text, re.MULTILINE)
             figs = re.findall(r"^\s+(\S+\.png) \|", text, re.MULTILINE)
             sec = lambda t, r, i, f=(): {"title": t, "role": r, "purpose": "why here",  # noqa: E731
@@ -163,3 +170,14 @@ def test_structured_answer_not_matching_schema_raises_for_retry():
     client._create = lambda **kw: SimpleNamespace(content=[_tool("submit", {"n": "many"})], stop_reason="tool_use")
     with pytest.raises(LLMError, match="does not match its schema"):
         client.complete_structured(system="s", text="u", schema=schema, description="d")
+
+
+def test_budget_depends_on_distinct_topics_not_on_source_volume():
+    from vitex.reconstruct.survey import Survey
+
+    topics = [{"topic": "PPO", "role": "core"}, {"topic": "A2C", "role": "supporting"},
+              {"topic": "REINFORCE history", "role": "brief"}]
+    # Same topics, whether they came from one document or five overlapping ones.
+    assert Survey("o", topics).budget() == 3000 + 2500 + 900 + 120
+    landscape = Survey("Overview text", topics).landscape()
+    assert "CORE (1):" in landscape and "SUPPORTING (1):" in landscape and "Overview text" in landscape

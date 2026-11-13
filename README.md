@@ -24,7 +24,9 @@ topic must understand all of it, front to back, without other material:
 - **Problem first** — every idea is introduced through the problem it solves,
   set up fully (setting, givens, goal, assumptions, why the obvious fails).
 - **Intuition, then formalism** — then every symbol tied back to the intuition.
-- **No logical jumps** — every derivation step by step, each step named.
+- **No logical jumps** — the key results (objectives, gradients, update rules)
+  derived step by step; theorems are stated with their intuition and cited, not
+  proved.
 - **No assumed topic knowledge** — every term and symbol defined at first use.
 - **Nothing out of the blue** — a method appears only once the reader needs it.
 - **Flow** — one continuous, well-structured text: each part follows
@@ -32,12 +34,16 @@ topic must understand all of it, front to back, without other material:
   is decided by what fits it — its purpose and its neighbours; a motivating
   question, signpost, or recap is used where it genuinely helps, never as a
   template. One notation throughout.
-- **Concrete** — worked examples with numbers; algorithms walked on small
-  inputs, written as numbered pseudocode (`algorithm`/`algpseudocode`).
-- **Depth follows difficulty, not the source** — if a video rushes through an
-  idea or a document gives it one line, the tutorial still gives it the full
-  treatment (setup, intuition, every step, an example). Reviews flag ideas that
-  are explained more briefly than they need.
+- **Depth by role, not by the source** — *core* ideas on the main line get the
+  full treatment; *supporting* ideas (variants, refinements, alternatives) a
+  compact but complete one (the problem they fix, the idea, the key equations,
+  how they are used, the trade-off); *brief* ones a few sentences or a table
+  row. A source's brevity never shortens a core idea, and its length never
+  inflates a minor one. Reviews flag both under- and over-explanation.
+- **Extras where they teach** — algorithm boxes (`algorithm`/`algpseudocode`)
+  for core methods, cost analyses where cost drives the story, worked examples
+  where a mechanism is not obvious, comparison tables for variants.
+- **Economy** — no proofs, tangents, repetition, or exhaustive enumerations.
 - **Build up** — easier before harder, concrete before abstract; the problem,
   the natural first attempt and why it fails, then the better solution. The
   outline fixes one storyline and orders material from all sources along it,
@@ -54,7 +60,9 @@ documents (.tex/.md/.txt/.pdf) ──► text + figures
                         │
    draft        each unit → complete, fact-checked LaTeX (research tools)
    inventory    each draft → checklist of every content item (ids)
-   outline      one storyline; every item placed (checked in code)
+   survey       map the TOPIC with research: important methods, their role
+                (core / supporting / brief), key papers, what the seeds miss
+   outline      one storyline; every item placed; depth and word target per section
    write        each section, with a map of what every section covers (parallel)
    review       per section: coverage + rigor + depth + flow → revise (×2)
    edit         an editor reads the WHOLE tutorial: repetition, consistency,
@@ -102,6 +110,20 @@ detected by required end markers) and retried; if it still fails the run
 4. Each seed unit attaches its highest-value eligible frames (`--max-images`,
    `--min-frame-value`) and gets a timeline of **all** frames' content, so what
    was on screen reaches the tutorial even when the image isn't attached.
+
+### Scope and length
+
+The survey reviews the field independently of the sources, so the tutorial
+covers what matters in the topic: important methods the sources miss are added,
+and minor ones stay compact even if a source dwelt on them. The introduction
+gets a short overview of the field and its literature.
+
+The length budget comes from the same map — an allowance per distinct topic by
+role (about 2,500 words for a core topic, 900 for a supporting one, 120 for a
+brief one) — not from the amount of source material, so overlapping sources do
+not inflate it. Override it with `--pages N`. The outline splits the budget
+into a word target per section; writers aim for it, and reviews flag sections
+well over or under it.
 
 ### Research
 
@@ -199,6 +221,7 @@ vitex run --doc draft.tex --doc notes.md --guide "Rewrite this into a rigorous, 
 | `output/<name>/<name>.tex`, `.pdf`, `figures/` | the tutorial |
 | `work/tutorial/coverage.json` | per section: assigned items and figures, every review round, whether it was approved |
 | `work/tutorial/editorial.json` | each whole-tutorial editorial round: assessment, cross-section issues, which sections were revised |
+| `work/tutorial/survey.json` | the literature map: every topic with its role, reason, key references, and whether the sources cover it |
 | `work/tutorial/outline.json` | the storyline, sections, plans, and item placement (and any items the brief excluded) |
 | `work/drafts/<unit>.tex`, `<unit>.items.json` | the fact-checked draft and content inventory of each seed unit |
 | `work/<source>/triage.json` | the rating and reason for every distinct video frame |
@@ -234,6 +257,7 @@ Precedence: built-in defaults → `.env`/environment → CLI flags.
 | `--research-iterations` | — | research rounds per pass (default 16) |
 | `--review-rounds` | — | review+revise rounds per section (default 2; 0 = off) |
 | `--editorial-rounds` | — | whole-tutorial editing rounds (default 2; 0 = off) |
+| `--pages` | — | target length in pages (default: sized from the survey's topics) |
 | `--parallel` | `VITEX_PARALLEL` | independent Claude requests run at once (default 6; 1 = sequential) |
 | `--prompt-cache` / `--no-prompt-cache` | `VITEX_PROMPT_CACHE` | prompt caching, on by default |
 | `--transcriber` | `VITEX_TRANSCRIBER` | `whisper` (default) or `aws` |

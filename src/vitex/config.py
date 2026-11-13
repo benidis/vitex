@@ -108,6 +108,10 @@ class Config:
     doc_unit_chars: int = 24000  # max characters of a document per seed unit
     # Rounds of review (coverage + step-by-step rigor) and revision per section.
     review_rounds: int = 2
+    # Target length in pages. None derives it from the survey's map of distinct
+    # topics and their roles, independent of how much (overlapping) source
+    # material there is.
+    pages: int | None = None
     # Rounds in which an editor reads the whole assembled tutorial and the
     # sections with cross-section problems are revised (0 disables).
     editorial_rounds: int = 2

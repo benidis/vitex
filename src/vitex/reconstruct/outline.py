@@ -43,12 +43,13 @@ class Item:
     detail: str
     figures: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
+    importance: str = "core"  # core | supporting | brief
 
     def line(self, detail_chars: int = 400) -> str:
         detail = " ".join(self.detail.split())
         if len(detail) > detail_chars:
             detail = detail[:detail_chars] + "..."
-        return f"{self.id} | {self.kind} | {self.title} | {detail}"
+        return f"{self.id} | {self.kind} | {self.importance} | {self.title} | {detail}"
 
 
 @dataclass
@@ -60,12 +61,15 @@ class Section:
     items: list[str]
     figures: list[str]
     new_material: list[str] = field(default_factory=list)
+    depth: str = "core"  # core | supporting
+    target_words: int = 0
 
     def spec(self) -> str:
         plan = "\n".join(f"  {i}. {step}" for i, step in enumerate(self.plan, 1))
         new = "\n".join(f"  - {m}" for m in self.new_material) or "  (none)"
         return (
-            f"Title: {self.title}\nRole: {self.role}\nPurpose (planning note): {self.purpose}\n"
+            f"Title: {self.title}\nRole: {self.role}\nDepth: {self.depth}\n"
+            f"Target length: about {self.target_words} words\nPurpose (planning note): {self.purpose}\n"
             f"Plan:\n{plan}\nBridging/prerequisite material to add:\n{new}"
         )
 
@@ -97,7 +101,7 @@ class Outline:
         lines = [f"Storyline: {self.storyline}", f"Reader background: {self.reader_background}"]
         for i, s in enumerate(self.sections):
             flag = ">>> " if i == mark else "    "
-            lines.append(f"{flag}{i + 1}. {s.title} [{s.role}] — {s.purpose}")
+            lines.append(f"{flag}{i + 1}. {s.title} [{s.role}, {s.depth}, ~{s.target_words} words] — {s.purpose}")
             covered = [f"{items[x].title} ({items[x].kind})" for x in s.items if x in items]
             if covered:
                 lines.append("        covers: " + "; ".join(covered))
@@ -125,6 +129,8 @@ class Outline:
                 items=[str(i).strip() for i in s.get("items", [])],
                 figures=[str(f).strip() for f in s.get("figures", [])],
                 new_material=[str(m) for m in s.get("new_material", [])],
+                depth=str(s.get("depth") or "core"),
+                target_words=int(s.get("target_words") or 0),
             )
             for s in d.get("sections", [])
         ]
@@ -192,6 +198,7 @@ def build_inventory(
                     detail=str(raw.get("detail", "")),
                     figures=[str(f) for f in raw.get("figures", [])],
                     depends_on=[str(d) for d in raw.get("depends_on", [])],
+                    importance=str(raw.get("importance") or "core"),
                 )
             )
     return items, summaries
@@ -258,6 +265,34 @@ def repair_outline(outline: Outline, items: list[Item], figures: set[str]) -> li
     return changes
 
 
+def fit_budget(outline: Outline, items: list[Item], budget: int) -> list[str]:
+    """Make the section targets add up to ``budget`` words; return what changed.
+
+    Sections without a target get one in proportion to their items (core items
+    weigh more); then all targets are scaled together if their sum is off by
+    more than 15%, so the outline's relative allocation is kept.
+    """
+    by_id = {i.id: i for i in items}
+    weight = {"core": 3.0, "supporting": 1.5, "brief": 0.5}
+    changes: list[str] = []
+    missing = [s for s in outline.sections if s.target_words <= 0]
+    if missing:
+        set_total = sum(s.target_words for s in outline.sections if s.target_words > 0)
+        weights = {id(s): 1.0 + sum(weight.get(by_id[i].importance, 1.0) for i in s.items if i in by_id) for s in missing}
+        pool = max(budget - set_total, budget * len(missing) // max(1, len(outline.sections)))
+        total_w = sum(weights.values())
+        for s in missing:
+            s.target_words = max(300, round(pool * weights[id(s)] / total_w))
+        changes.append(f"assigned targets to {len(missing)} section(s) without one")
+    total = sum(s.target_words for s in outline.sections)
+    if total and abs(total - budget) > 0.15 * budget:
+        scale = budget / total
+        for s in outline.sections:
+            s.target_words = max(300, round(s.target_words * scale))
+        changes.append(f"scaled section targets by {scale:.2f} ({total} -> {budget} words)")
+    return changes
+
+
 def build_outline(
     client: ClaudeClient,
     units: list[SeedUnit],
@@ -265,6 +300,8 @@ def build_outline(
     summaries: dict[str, str],
     figures: list[Figure],
     cfg: Config,
+    budget_words: int,
+    landscape: str = "",
 ) -> Outline:
     """Design the tutorial's outline, guaranteed to place every item."""
     fig_names = {f.name for f in figures}
@@ -277,7 +314,7 @@ def build_outline(
     )
     inventory = "\n".join(i.line() for i in items)
     system = outline_system(cfg.ground, cfg.guide)
-    user = outline_user(sources, inventory, fig_text, cfg.title)
+    user = outline_user(sources, inventory, fig_text, cfg.title, budget_words, landscape or "(no survey)")
 
     cache = cfg.tutorial_dir / "outline.json"
     key = pass_key(cfg, "outline", system, user, cfg.outline_attempts)
@@ -321,10 +358,13 @@ def build_outline(
 
     for change in repair_outline(outline, items, fig_names):
         log.warning("Outline fix: %s", change)
+    for change in fit_budget(outline, items, budget_words):
+        log.info("Outline budget: %s", change)
     for e in outline.excluded:
         log.warning("Outline: item %s left out per the author's brief: %s", e.get("id"), e.get("reason", ""))
     if cfg.title:
         outline.title = cfg.title
     write_cached(cache, key, outline.to_json())
-    log.info("Outline: %d sections — %s", len(outline.sections), " | ".join(s.title for s in outline.sections))
+    log.info("Outline: %d sections, %d words budgeted — %s", len(outline.sections),
+             sum(s.target_words for s in outline.sections), " | ".join(s.title for s in outline.sections))
     return outline

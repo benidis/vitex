@@ -18,6 +18,7 @@ Stages:
   then, across all seeds:
     6. split into seed units; draft each (fact-checked)  -> work/drafts/<unit>.tex
     7. inventory every item of content                   -> work/drafts/<unit>.items.json
+    7b. survey the topic and its literature; size budget  -> work/tutorial/survey.json
     8. outline placing every item                        -> work/tutorial/outline.json
     9. write + review + revise each section (parallel)   -> work/tutorial/sections/
    10. editor reads the whole; fix flagged sections      -> work/tutorial/editorial/
@@ -39,7 +40,7 @@ from vitex.media.documents import load_document
 from vitex.media.download import SourceInfo
 from vitex.media.frames import extract_frames
 from vitex.media.triage import triage_frames
-from vitex.models import Figure, Frame, Segment, SeedUnit
+from vitex.models import Figure, Frame, SeedUnit, Segment
 from vitex.output import (
     assemble_document,
     build_pdf,
@@ -55,6 +56,7 @@ from vitex.reconstruct import (
     build_bibliography,
     build_inventory,
     build_outline,
+    build_survey,
     document_units,
     draft_seeds,
     edit_tutorial,
@@ -62,6 +64,7 @@ from vitex.reconstruct import (
     video_units,
     write_sections,
 )
+from vitex.reconstruct.survey import WORDS_PER_PAGE
 from vitex.transcribe import build_transcriber
 from vitex.utils import fingerprint, read_cached, require_tool, safe_stem, write_cached
 
@@ -181,7 +184,16 @@ class Pipeline:
         drafts = draft_seeds(client, units, cfg)
         items, summaries = build_inventory(client, units, drafts, cfg)
         log.info("Inventory: %d content items to place", len(items))
-        outline = build_outline(client, units, items, summaries, list(figures.values()), cfg)
+        # Survey the topic itself: which methods matter, and which the seeds miss.
+        survey = build_survey(client, units, items, summaries, cfg)
+        # Length budget from the distinct topics and their roles (not from the
+        # amount of source material); --pages overrides it.
+        budget = cfg.pages * WORDS_PER_PAGE if cfg.pages else survey.budget()
+        log.info("Length budget: %d words (~%d pages)%s", budget, budget // WORDS_PER_PAGE,
+                 " from --pages" if cfg.pages else " from the survey's topics")
+        outline = build_outline(
+            client, units, items, summaries, list(figures.values()), cfg, budget, survey.landscape()
+        )
         jobs = section_jobs(outline, items, drafts, units, figures)
         sections = write_sections(client, jobs, figures, cfg)
         # Holistic pass: an editor reads the whole tutorial and the sections with

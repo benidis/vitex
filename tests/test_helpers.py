@@ -36,8 +36,9 @@ def test_draft_prompts_carry_the_tutorial_standard_and_seed_rules():
     assert "not a summary" in system and "SEEDS" in system and "arxiv_search" in system
     assert "arxiv_search" not in draft_system(ground=False)
     user = draft_user(kind="document", source_title="Notes", position="part 1 of 2",
-                      text="BODY", figure_lines="", visual_notes="")
+                      text="BODY", figure_lines="", visual_notes="", target_words=1200)
     assert "Keep ALL of its content" in user and "BODY" in user and "(none)" in user
+    assert "about 1200 words" in user
 
 
 def test_config_validate_rejects_bad_provider():
@@ -57,7 +58,9 @@ def test_authors_brief_reaches_every_writing_prompt():
     for build in (draft_system, outline_system, section_system, review_system, revise_system):
         assert brief in build(True, brief)
         assert "AUTHOR'S BRIEF" not in build(True, None)
-    assert "Depth follows difficulty" in section_system(True)
+    text = section_system(True)
+    assert "Depth follows the idea's ROLE" in text and "do not\n   prove them" in text
+    assert "Length is never a concern" not in text
 
 
 def test_cli_title_name_and_guide_file(tmp_path, monkeypatch):

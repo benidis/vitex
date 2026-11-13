@@ -29,9 +29,13 @@ from vitex.llm.prompts import (
 from vitex.models import Figure, SeedUnit
 from vitex.output.latex import cite_contexts, complete_bibliography, referenced_figures
 from vitex.reconstruct.seeds import figure_lines, viewable
-from vitex.utils import fingerprint, read_cached, run_parallel, write_cached
+from vitex.utils import fingerprint, read_cached, run_parallel, word_count, write_cached
 
 log = logging.getLogger("vitex")
+
+# Drafts are verified, expanded source material: roughly this multiple of the
+# seed unit's length (the final length is set by the outline's budget).
+_DRAFT_EXPANSION = 2.0
 
 _FENCE_RE = re.compile(r"^\s*```(?:latex|tex)?\s*\n(.*?)\n```\s*$", re.DOTALL)
 
@@ -172,6 +176,7 @@ def draft_seeds(client: ClaudeClient, units: list[SeedUnit], cfg: Config) -> dic
             text=unit.text,
             figure_lines=figure_lines(unit.figures),
             visual_notes=unit.visual_notes,
+            target_words=max(500, round(_DRAFT_EXPANSION * word_count(unit.text))),
         )
         cache = cache_dir / f"{unit.id}.tex"
         key = pass_key(cfg, "draft", system, user, [f.name for f in unit.figures])

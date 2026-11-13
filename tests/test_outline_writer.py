@@ -56,7 +56,7 @@ class OutlineClient:
 def test_build_outline_retries_with_the_missing_ids(tmp_path):
     units = [SeedUnit(id=u, kind="video", source_title="V", position="p", text="t") for u in ("u1", "u2")]
     client = OutlineClient()
-    outline = build_outline(client, units, _items(), {}, [], Config(workdir=tmp_path, ground=False))
+    outline = build_outline(client, units, _items(), {}, [], Config(workdir=tmp_path, ground=False), 5000)
     assert outline.sections[0].items == ["I1.01", "I1.02", "I2.01"]
     assert len(client.calls) == 2 and "I2.01" in client.calls[1]
 
@@ -118,7 +118,7 @@ class ExcludingClient:
 def _outline_with(tmp_path, guide):
     units = [SeedUnit(id=u, kind="video", source_title="V", position="p", text="t") for u in ("u1", "u2")]
     cfg = Config(workdir=tmp_path, ground=False, guide=guide)
-    return build_outline(ExcludingClient(), units, _items(), {}, [], cfg)
+    return build_outline(ExcludingClient(), units, _items(), {}, [], cfg, 5000)
 
 
 def test_exclusion_is_honored_only_with_an_authors_brief(tmp_path):
@@ -272,3 +272,29 @@ def test_editor_reads_the_whole_and_fixes_the_flagged_sections(tmp_path):
 def test_editorial_fix_that_guts_a_section_is_rejected(tmp_path):
     edited, original = _edit(tmp_path, EditorClient(shrink=True))
     assert edited[1] == original[1]
+
+
+def test_fit_budget_assigns_missing_targets_and_scales_to_the_budget():
+    from vitex.reconstruct.outline import fit_budget
+
+    outline = Outline(title="T", reader_background="b", notation=[], sections=[
+        _sec("A", "core", ["I1.01", "I1.02"]), _sec("B", "core", ["I2.01"]),
+    ])
+    outline.sections[0].target_words = 20000  # wildly over a 6000-word budget
+    changes = fit_budget(outline, _items(), 6000)
+    assert outline.sections[1].target_words > 0
+    total = sum(s.target_words for s in outline.sections)
+    assert abs(total - 6000) <= 0.15 * 6000 and any("scaled" in c for c in changes)
+
+
+def test_length_checks_and_shrink_guard():
+    from vitex.reconstruct.writer import mechanical_checks, min_kept_words
+
+    sec = _sec("A", "core", [])
+    sec.target_words = 1000
+    long_text = "\\section{A}\n" + "word " * 2000
+    assert any("over its target" in c for c in mechanical_checks(long_text, sec, set()))
+    assert any("far below" in c for c in mechanical_checks("\\section{A} short", sec, set()))
+    # Normal revisions may not cut more than 15%; an over-long section may be cut toward its target.
+    assert min_kept_words(1000, 1000) == 850
+    assert min_kept_words(2000, 1000) == 1000  # max(0.7 * target, half of current)

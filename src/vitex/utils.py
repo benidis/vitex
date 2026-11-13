@@ -93,6 +93,14 @@ def run(cmd: Sequence[str], *, desc: str = "") -> str:
     return proc.stdout
 
 
+_LATEX_CMD_RE = re.compile(r"\\[A-Za-z@]+\*?|[{}$&^_~\\%]")
+
+
+def word_count(text: str) -> int:
+    """Approximate prose word count of plain text or LaTeX (commands ignored)."""
+    return len(_LATEX_CMD_RE.sub(" ", text).split())
+
+
 def safe_stem(text: str, fallback: str = "tutorial") -> str:
     """Turn arbitrary text (e.g. a video title) into a filesystem-safe stem."""
     text = re.sub(r"[^\w\s-]", "", text)

@@ -59,12 +59,15 @@ from vitex.reconstruct.chapters import (
 )
 from vitex.reconstruct.outline import Item, Outline, Section
 from vitex.reconstruct.seeds import figure_lines
-from vitex.utils import fingerprint, read_cached, run_parallel, write_cached
+from vitex.utils import fingerprint, read_cached, run_parallel, word_count, write_cached
 
 log = logging.getLogger("vitex")
 
 _MATERIAL_CHARS = 320_000  # cap on draft material per section prompt (~80k tokens)
-_MIN_KEPT_FRACTION = 0.85  # a review revision shorter than this share is rejected
+_MIN_KEPT_FRACTION = 0.85  # a review revision shorter than this share is rejected...
+_OVER_BUDGET = 1.3  # ...unless the section is this far over its target: then it may be
+_FLOOR_OF_TARGET = 0.7  # cut, but not below this share of the target or half its length
+_UNDER_BUDGET = 0.5  # a section below this share of its target is flagged
 # Editorial fixes may remove repetition, so they may shrink a section more; the
 # removed material exists elsewhere by construction.
 _MIN_KEPT_EDITORIAL = 0.6
@@ -86,7 +89,22 @@ class SectionJob:
 
 
 def _items_text(items: list[Item]) -> str:
-    return "\n".join(f"- {i.id} | {i.kind} | {i.title}\n    {i.detail.strip()}" for i in items)
+    return "\n".join(f"- {i.id} | {i.kind} | {i.importance} | {i.title}\n    {i.detail.strip()}" for i in items)
+
+
+def length_note(latex: str, target: int) -> str:
+    words = word_count(latex)
+    if target <= 0:
+        return f"{words} words (no target)"
+    return f"{words} words against a target of about {target} ({100 * words / target:.0f}%)"
+
+
+def min_kept_words(before_words: int, target: int) -> float:
+    """Shortest acceptable revision: revisions may not drop content, except that
+    a section well over its target may be cut back toward it."""
+    if target > 0 and before_words > _OVER_BUDGET * target:
+        return max(_FLOOR_OF_TARGET * target, 0.5 * before_words)
+    return _MIN_KEPT_FRACTION * before_words
 
 
 def _material(items: list[Item], drafts: dict[str, str], units: dict[str, SeedUnit]) -> str:
@@ -162,8 +180,17 @@ def section_jobs(
 
 def mechanical_checks(latex: str, section: Section, known_figures: set[str]) -> list[str]:
     """Problems detectable in code, reported to the reviewer and reviser."""
+    words, target = word_count(latex), section.target_words
+    problems: list[str] = []
+    if target > 0 and words > _OVER_BUDGET * target:
+        problems.append(
+            f"the section is {words} words, {100 * words / target - 100:.0f}% over its target of {target}; "
+            "cut what teaches least (proofs, tangents, repetition, extras that add little)"
+        )
+    elif target > 0 and words < _UNDER_BUDGET * target:
+        problems.append(f"the section is {words} words, far below its target of {target}; check for under-explained ideas")
     used = referenced_figures(latex)
-    problems = [f"assigned figure {f} is not included" for f in section.figures if f not in used]
+    problems += [f"assigned figure {f} is not included" for f in section.figures if f not in used]
     problems += [f"figure file {f} does not exist; use only provided names" for f in sorted(used - known_figures)]
     if "$$" in latex:
         problems.append("uses $$...$$ display math; use equation/align or \\[...\\]")
@@ -188,7 +215,7 @@ def _review_and_revise(
         checks = mechanical_checks(latex, section, known_figures)
         ruser = review_user(
             overview=job.map_text, spec=section.spec(), items=job.items_text, section=latex,
-            checks="\n".join(f"- {c}" for c in checks),
+            checks="\n".join(f"- {c}" for c in checks), length=length_note(latex, section.target_words),
         )
         with staged(client, f"{job.label} review {rnd}"):
             review = structured_valid(
@@ -220,9 +247,9 @@ def _review_and_revise(
                 cfg.generation_attempts,
             )
         revised = without_sentinel(revised, SECTION_END)
-        if len(revised) < _MIN_KEPT_FRACTION * len(latex):
-            log.warning("%s: revision %d dropped %.0f%% of the text; keeping the previous version",
-                        job.what, rnd, 100 * (1 - len(revised) / len(latex)))
+        if word_count(revised) < min_kept_words(word_count(latex), section.target_words):
+            log.warning("%s: revision %d cut %.0f%% of the text, more than allowed; keeping the previous version",
+                        job.what, rnd, 100 * (1 - word_count(revised) / max(1, word_count(latex))))
             report["rounds"][-1]["revision_rejected"] = True
             continue
         latex = revised
@@ -316,7 +343,6 @@ def edit_tutorial(
     if not cfg.editorial_rounds or not sections:
         return sections
     by_id = {i.id: i for i in items}
-    map_text = outline.map(by_id)
     esystem, vsystem = editor_system(cfg.guide), revise_system(cfg.ground, cfg.guide)
     cache_dir = cfg.tutorial_dir / "editorial"
     sections = list(sections)
@@ -324,6 +350,8 @@ def edit_tutorial(
 
     for rnd in range(1, cfg.editorial_rounds + 1):
         document = _assembled(sections, jobs)
+        lengths = "\n".join(f"    section {j.idx + 1}: {length_note(t, j.section.target_words)}" for j, t in zip(jobs, sections))
+        map_text = f"{outline.map(by_id)}\nActual lengths:\n{lengths}"
         euser = editor_user(map_text=map_text, notation=outline.notation_text(), document=document)
         cache = cache_dir / f"round_{rnd}.json"
         key = pass_key(cfg, "editor", esystem, euser)
