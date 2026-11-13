@@ -46,11 +46,15 @@ videos or documents, they must understand all of it.
    the topic is needed (an inequality, a data structure, an optimization trick),
    explain it briefly where it is first needed.
 5. Nothing out of the blue. Every section and every method appears because the
-   reader now needs it: first state the question or limitation, arising from
+   reader now needs it: first make clear the need or limitation, arising from
    what came before, that motivates it. Never introduce a method just to list it.
-6. Flow. Open each section by saying where we are and what question it answers;
-   close it by stating what we now know and what problem remains — which the next
-   section picks up. Use one consistent notation throughout.
+6. Flow. The tutorial reads as one continuous, well-structured text: each part
+   follows naturally from what came before, and the reader always knows why the
+   current material matters. How a section opens, connects, and closes is
+   decided by what fits that section — its purpose and its relation to the
+   sections around it. A motivating question, a short signpost, or a brief recap
+   is fine where it genuinely helps the reader; none is required, and none is
+   applied as a template. Use one consistent notation throughout.
 7. Concrete. Use worked examples with actual numbers or small cases; walk through
    algorithms on a small input; make shapes and sizes explicit.
 8. Depth follows difficulty, NOT the source. You are responsible for the reader
@@ -399,10 +403,11 @@ OUTLINE RULES
   before harder; concrete before abstract; the problem, then the natural first
   attempt and why it falls short, then the better solutions. Interleave material
   from different seeds wherever that serves the story.
-- No out-of-the-blue sections: for every section, state the question the reader
-  has at that point and why it arises from the previous section ("motivation").
-  If the flow needs a prerequisite or bridge that no seed covers, add it under
-  "new_material" of the section where it is first needed.
+- No out-of-the-blue sections: for every section, note in "purpose" what it
+  establishes and why the reader needs it at this point of the storyline. This is
+  a planning note for the writer, not text to reproduce. If the flow needs a
+  prerequisite or bridge that no seed covers, add it under "new_material" of the
+  section where it is first needed.
 - For each section give a "plan": the ordered steps of the exposition (problem
   setup, intuition, each derivation step, examples, conclusions) — detailed
   enough that a writer can follow it without guessing. Size the plan to the
@@ -446,15 +451,16 @@ OUTLINE_SCHEMA = {
                 "properties": {
                     "title": {"type": "string"},
                     "role": {"type": "string", "enum": ["introduction", "core", "optional", "summary"]},
-                    "question": {"type": "string", "description": "The question this section answers."},
-                    "motivation": {"type": "string", "description": "Why the reader needs this now."},
+                    "purpose": {
+                        "type": "string",
+                        "description": "What the section establishes and why it is needed at this point (planning note).",
+                    },
                     "plan": {"type": "array", "items": {"type": "string"}},
                     "items": {"type": "array", "items": {"type": "string"}},
                     "new_material": {"type": "array", "items": {"type": "string"}},
                     "figures": {"type": "array", "items": {"type": "string"}},
-                    "leads_to": {"type": "string", "description": "The open question passed on."},
                 },
-                "required": ["title", "role", "question", "motivation", "plan", "items", "figures", "leads_to"],
+                "required": ["title", "role", "purpose", "plan", "items", "figures"],
             },
         },
         "excluded_items": {
@@ -509,7 +515,7 @@ You are the author writing ONE section of a tutorial, following the outline
 designed for the whole tutorial. You get the full outline (so you know what the
 reader has already learned and what comes later), this section's specification,
 the content items it must cover, the fact-checked draft material those items
-come from, its figures, and the end of the previous section.
+come from, its figures, and the plans of the sections just before and after it.
 
 {TUTORIAL_STANDARD}
 
@@ -526,12 +532,14 @@ WRITING THIS SECTION
   intuition, derivation steps, and examples yourself — you are responsible for
   the reader understanding it, whatever the sources did.
 - Follow the plan's order. Cover the listed new_material where it is needed.
-- Open by connecting to the end of the previous section and stating this
-  section's question; close by stating what was established and the open
-  question in "leads_to". Never re-teach earlier sections (refer back to them);
-  do not anticipate later sections beyond a one-line preview.
-- Use the outline's notation exactly. Reuse the citation keys already in use for
-  the same works.
+- Connect to what the reader has just learned and to what comes next in
+  whatever way fits this section's purpose — the neighbouring sections' plans
+  tell you exactly what they cover. There is no fixed template for openings or
+  closings. Never re-teach earlier sections (refer back to them), and do not
+  cover material that belongs to later sections. The outline's "purpose" is a
+  planning note for you, not text to reproduce.
+- Use the outline's notation exactly. Cite a work with the key listed for it
+  below when one exists.
 - Include every assigned figure, with a caption, discussed in the text.
 - The introduction gives the motivating problem, what the reader will learn, the
   assumed background, and a roadmap of the sections. The summary introduces
@@ -556,13 +564,15 @@ def section_user(
     items: str,
     material: str,
     figure_lines: str,
-    previous_tail: str,
+    neighbors: str,
     cite_keys: str,
 ) -> str:
     return f"""
 Tutorial: {title}
 
-Full outline (you are writing the section marked >>>):
+Map of the whole tutorial: every section and the content it covers (you are
+writing the section marked >>>; the reader knows everything in the sections
+before it and nothing from the sections after it):
 {overview}
 
 Notation (use exactly):
@@ -577,12 +587,12 @@ Items this section must cover completely:
 Figures for this section (attached as images; use these exact file names):
 {figure_lines or "(none)"}
 
-Citation keys already used in earlier sections (reuse for the same works):
-{cite_keys or "(none yet)"}
+Citation keys used in the source drafts (use the same key for the same work):
+{cite_keys or "(none)"}
 
-End of the previous section (continue from here):
+The sections just before and after this one (for continuity):
 --------------------------------------------------
-{previous_tail or "(this is the first section)"}
+{neighbors}
 --------------------------------------------------
 
 Fact-checked draft material for these items:
@@ -617,9 +627,11 @@ Check, and report precisely:
 2. Rigor: logical jumps, skipped derivation steps, symbols or terms used before
    being defined, methods introduced without motivation, unjustified claims,
    and factual errors. {research}
-3. Flow: does it open from the previous section and state its question, follow a
-   sensible order, and close with what was learned and what comes next? Does it
-   re-teach earlier material or depend on something not yet covered?
+3. Flow: does it follow naturally from the previous section and fit the
+   storyline, in a sensible internal order? Does it re-teach earlier material or
+   depend on something not yet covered? Flag openings, transitions, or closings
+   that feel forced or templated in this context (e.g. a closing question or
+   recap that adds nothing) — not ones that genuinely help the reader.
 4. Depth: any idea explained more briefly or superficially than its difficulty
    demands — e.g. a short paragraph where the reader needs a problem setup, a
    step-by-step derivation, or a worked example. Say exactly what to add. Judge
@@ -708,6 +720,107 @@ Current section:
 ==================================================
 
 The original writing brief for this section (outline, items, figures, draft material):
+{section_request}
+""".strip()
+
+
+# ---------------------------------------------------------------------------
+# Pass 6: editorial read of the whole tutorial, then targeted section fixes
+# ---------------------------------------------------------------------------
+
+
+def editor_system(guide: str | None = None) -> str:
+    return f"""
+You are the editor of a tutorial whose sections were written separately. You
+read the WHOLE assembled tutorial front to back, as its intended reader would,
+and find the problems that only show when it is read as one text. Per-section
+reviews have already checked each section on its own; your job is the whole.
+
+{TUTORIAL_STANDARD}
+
+Look for:
+1. Repetition: the same idea, definition, derivation, or example explained in
+   more than one section. Keep the full treatment where the outline places it;
+   elsewhere replace it with a short reference back.
+2. Inconsistency: notation, symbols, terminology, conventions (signs,
+   indexing, normalization), or numbers that differ between sections.
+3. Order: something used before it is introduced, or "as we saw" referring to
+   material that has not appeared yet or appears only later.
+4. Transitions: a section's opening that does not fit what the previous section
+   actually says, or a connection that feels forced or templated in context.
+5. Balance: comparable ideas treated at very different depth, or an important
+   idea thin compared with its role in the storyline.
+6. Contradictions between sections, and gaps in the storyline (a step the
+   reader needs that no section provides).
+Report only real problems that matter to the reader. For each, give the number
+of the section that must change, where (a short quote), what is wrong, and the
+exact fix; list the other sections involved. Fixes must never delete content
+that appears nowhere else. If the tutorial reads well as a whole, return no
+issues.{brief_block(guide)}
+""".strip()
+
+
+EDITORIAL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "assessment": {"type": "string", "description": "2-4 sentences on how the whole reads."},
+        "issues": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "section": {"type": "integer", "description": "Number of the section to change."},
+                    "related_sections": {"type": "array", "items": {"type": "integer"}},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["repetition", "inconsistency", "order", "transition", "balance",
+                                 "contradiction", "storyline", "other"],
+                    },
+                    "location": {"type": "string"},
+                    "problem": {"type": "string"},
+                    "fix": {"type": "string"},
+                },
+                "required": ["section", "kind", "location", "problem", "fix"],
+            },
+        },
+    },
+    "required": ["assessment", "issues"],
+}
+
+
+def editor_user(*, map_text: str, notation: str, document: str) -> str:
+    return f"""
+Map of the tutorial (sections and the content each covers):
+{map_text}
+
+Notation fixed for the whole tutorial:
+{notation or "(none fixed)"}
+
+The assembled tutorial (each section starts with a "% ===== SECTION n" marker):
+==================================================
+{document}
+==================================================
+""".strip()
+
+
+def edit_fix_user(*, section_request: str, section: str, notes: str, related: str) -> str:
+    return f"""
+Editorial notes from reading the WHOLE tutorial — resolve every one in this
+section (the related sections are shown so you can make it consistent with
+them; do not change them):
+{notes}
+
+Current text of the related sections:
+==================================================
+{related or "(none)"}
+==================================================
+
+Current section:
+==================================================
+{section}
+==================================================
+
+The original writing brief for this section (map, items, figures, draft material):
 {section_request}
 """.strip()
 

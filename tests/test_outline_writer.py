@@ -3,7 +3,7 @@
 from vitex.config import Config
 from vitex.models import SeedUnit
 from vitex.reconstruct.outline import Item, Outline, Section, build_outline, outline_problems, repair_outline
-from vitex.reconstruct.writer import write_sections
+from vitex.reconstruct.writer import edit_tutorial, section_jobs, write_sections
 
 SECTION_END = "% END OF SECTION"
 
@@ -17,8 +17,8 @@ def _items():
 
 
 def _sec(title, role, items, figures=()):
-    return Section(title=title, role=role, question="q", motivation="m", plan=["p"], items=list(items),
-                   figures=list(figures), leads_to="l")
+    return Section(title=title, role=role, purpose="why it is needed here", plan=["p"], items=list(items),
+                   figures=list(figures))
 
 
 def test_repair_outline_places_every_item_and_figure():
@@ -88,7 +88,8 @@ def _write(tmp_path, client, rounds=2):
                       sections=[_sec("Body", "core", ["I1.01", "I1.02"])])
     units = [SeedUnit(id="u1", kind="video", source_title="V", position="p", text="t")]
     cfg = Config(workdir=tmp_path, ground=False, review_rounds=rounds)
-    return write_sections(client, outline, _items(), {"u1": "draft"}, units, {}, cfg)
+    jobs = section_jobs(outline, _items(), {"u1": "draft"}, units, {})
+    return write_sections(client, jobs, {}, cfg)
 
 
 def test_review_loop_revises_until_approved(tmp_path):
@@ -129,3 +130,145 @@ def test_exclusion_is_honored_only_with_an_authors_brief(tmp_path):
     without = _outline_with(tmp_path / "b", None)
     assert without.excluded == []
     assert "I2.01" in without.sections[0].items  # restored and attached in code
+
+
+def test_run_parallel_keeps_order_and_finishes_all_before_raising():
+    import threading
+    import time
+
+    import pytest
+
+    from vitex.utils import run_parallel
+
+    done = []
+    lock = threading.Lock()
+
+    def work(i):
+        time.sleep(0.01 * (5 - i))  # finish out of order
+        if i == 1:
+            raise ValueError("task 1 failed")
+        with lock:
+            done.append(i)
+        return i * 10
+
+    assert run_parallel(lambda i: i * 10, [3, 1, 2], workers=3) == [30, 10, 20]
+    with pytest.raises(ValueError, match="task 1"):
+        run_parallel(work, [0, 1, 2, 3, 4], workers=5)
+    assert sorted(done) == [0, 2, 3, 4]  # the others still completed (and would be cached)
+
+
+def test_stage_labels_are_per_thread():
+    import threading
+
+    from vitex.config import Config
+    from vitex.llm.client import ClaudeClient
+
+    client = ClaudeClient.__new__(ClaudeClient)
+    client.cfg = Config()
+    seen = {}
+
+    def worker(name):
+        with client.stage(name):
+            threading.Event().wait(0.02)
+            seen[name] = client._stage
+
+    threads = [threading.Thread(target=worker, args=(f"s{i}",)) for i in range(4)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert seen == {f"s{i}": f"s{i}" for i in range(4)}
+
+
+class ParallelWriterClient:
+    def __init__(self):
+        self.requests = []
+
+    def complete(self, *, text, **kw):
+        self.requests.append(text)
+        title = next(line[7:] for line in text.splitlines() if line.startswith("Title: "))
+        return f"\\section{{{title}}}\n{'body ' * 30}\n{SECTION_END}"
+
+    complete_with_tools = complete
+
+    def complete_structured(self, **kw):
+        return {"approved": True, "missing_items": [], "issues": []}
+
+
+def test_sections_are_written_in_parallel_with_neighbor_plans(tmp_path):
+    outline = Outline(title="T", reader_background="b", notation=[], storyline="s", sections=[
+        _sec("Intro", "introduction", []), _sec("Body", "core", ["I1.01", "I1.02"]), _sec("Summary", "summary", []),
+    ])
+    units = [SeedUnit(id="u1", kind="video", source_title="V", position="p", text="t")]
+    cfg = Config(workdir=tmp_path, ground=False, review_rounds=1, parallel=3)
+    client = ParallelWriterClient()
+    jobs = section_jobs(outline, _items(), {"u1": "draft \\cite{vaswani2017attention}"}, units, {})
+    written = write_sections(client, jobs, {}, cfg)
+
+    assert [w.splitlines()[0] for w in written] == ["\\section{Intro}", "\\section{Body}", "\\section{Summary}"]
+    body = next(r for r in client.requests if "This section:\nTitle: Body\n" in r)
+    assert "Previous section (1):\nTitle: Intro" in body and "Next section (3):\nTitle: Summary" in body
+    assert "vaswani2017attention" in body  # shared citation keys from the drafts
+    # The map shows what every section covers, not just titles.
+    assert "covers: Attention (concept); Scaling (derivation)" in body
+
+
+def test_flow_rules_do_not_mandate_a_closing_question():
+    from vitex.llm.prompts import TUTORIAL_STANDARD, review_system, section_system
+
+    for text in (TUTORIAL_STANDARD, section_system(True), review_system(True)):
+        assert "leads_to" not in text and "what problem remains" not in text
+    assert "none is required" in TUTORIAL_STANDARD
+    assert "genuinely help" in review_system(True)
+
+
+class EditorClient:
+    """Editor flags a repetition in section 2 (related: 1); round 2 is clean."""
+
+    def __init__(self, shrink=False):
+        self.reads, self.fix_requests, self.shrink = 0, [], shrink
+
+    def complete_structured(self, **kw):
+        self.reads += 1
+        if self.reads == 1:
+            return {"assessment": "mostly good", "issues": [
+                {"section": 2, "related_sections": [1], "kind": "repetition", "location": "Attention is...",
+                 "problem": "re-explains attention", "fix": "refer back to section 1"},
+                {"section": 99, "kind": "other", "location": "x", "problem": "bogus", "fix": "none"},
+            ]}
+        return {"assessment": "reads well", "issues": []}
+
+    def complete(self, *, text, **kw):
+        self.fix_requests.append(text)
+        body = "x" if self.shrink else "Body, now referring back to Section 1. " * 10
+        return f"\\section{{Body}}\n{body}\n{SECTION_END}"
+
+    complete_with_tools = complete
+
+
+def _edit(tmp_path, client):
+    outline = Outline(title="T", reader_background="b", notation=[], storyline="s",
+                      sections=[_sec("Intro", "introduction", ["I1.01"]), _sec("Body", "core", ["I1.02"])])
+    units = [SeedUnit(id="u1", kind="video", source_title="V", position="p", text="t")]
+    jobs = section_jobs(outline, _items(), {"u1": "draft"}, units, {})
+    cfg = Config(workdir=tmp_path, ground=False, editorial_rounds=2)
+    sections = ["\\section{Intro}\nAttention defined here.", "\\section{Body}\n" + "Attention is explained again. " * 10]
+    return edit_tutorial(client, outline, _items(), sections, jobs, cfg), sections
+
+
+def test_editor_reads_the_whole_and_fixes_the_flagged_sections(tmp_path):
+    import json as _json
+
+    client = EditorClient()
+    edited, original = _edit(tmp_path, client)
+    assert edited[0] == original[0]  # untouched
+    assert "referring back to Section 1" in edited[1]
+    assert client.reads == 2  # re-read after fixes; clean -> stop
+    assert len(client.fix_requests) == 1
+    fix = client.fix_requests[0]
+    assert "re-explains attention" in fix and "SECTION 1: Intro" in fix  # related section text included
+    report = _json.loads((tmp_path / "tutorial" / "editorial.json").read_text())
+    assert report[0]["revised"] == [2] and report[1]["issues"] == []
+
+
+def test_editorial_fix_that_guts_a_section_is_rejected(tmp_path):
+    edited, original = _edit(tmp_path, EditorClient(shrink=True))
+    assert edited[1] == original[1]

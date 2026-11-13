@@ -27,8 +27,11 @@ topic must understand all of it, front to back, without other material:
 - **No logical jumps** — every derivation step by step, each step named.
 - **No assumed topic knowledge** — every term and symbol defined at first use.
 - **Nothing out of the blue** — a method appears only once the reader needs it.
-- **Flow** — each section opens from the previous one and hands an open
-  question to the next; one notation throughout.
+- **Flow** — one continuous, well-structured text: each part follows
+  naturally from what came before. How a section opens, connects, and closes
+  is decided by what fits it — its purpose and its neighbours; a motivating
+  question, signpost, or recap is used where it genuinely helps, never as a
+  template. One notation throughout.
 - **Concrete** — worked examples with numbers; algorithms walked on small
   inputs, written as numbered pseudocode (`algorithm`/`algpseudocode`).
 - **Depth follows difficulty, not the source** — if a video rushes through an
@@ -52,11 +55,29 @@ documents (.tex/.md/.txt/.pdf) ──► text + figures
    draft        each unit → complete, fact-checked LaTeX (research tools)
    inventory    each draft → checklist of every content item (ids)
    outline      one storyline; every item placed (checked in code)
-   write        section by section, from the outline + drafts (research tools)
-   review       coverage + rigor + depth + flow → revise (×2)
+   write        each section, with a map of what every section covers (parallel)
+   review       per section: coverage + rigor + depth + flow → revise (×2)
+   edit         an editor reads the WHOLE tutorial: repetition, consistency,
+                order, transitions, balance → fix flagged sections (×2)
    bibliography \cite keys → grounded thebibliography (batches of 12)
    compile      latexmk + edit-based repair that may not delete content
 ```
+
+**A holistic view at both ends.** The outline is designed in one pass over the
+inventory of all sources. Every section writer gets a map of the whole
+tutorial — each section's purpose and the content it covers — so it knows
+exactly what the reader already has and what comes later, plus the plans of its
+neighbouring sections. After writing, an editor reads the whole assembled
+tutorial and reports what only shows across sections (repetition, inconsistent
+notation or terms, forward references, transitions that don't fit, uneven
+depth, contradictions, storyline gaps); the affected sections are revised with
+the editor's notes and the text of the related sections, and the editor reads
+again (`--editorial-rounds`, default 2). Findings go to
+`work/tutorial/editorial.json`.
+
+Independent requests run in parallel (`--parallel`, default 6): triage
+batches, drafts, inventories, sections (each written and reviewed on its own),
+editorial fixes, and bibliography batches.
 
 **Nothing is dropped.** The inventory is a checklist: the outline must place
 every item, and anything it misses after retries is attached in code. Each
@@ -177,6 +198,7 @@ vitex run --doc draft.tex --doc notes.md --guide "Rewrite this into a rigorous, 
 |---|---|
 | `output/<name>/<name>.tex`, `.pdf`, `figures/` | the tutorial |
 | `work/tutorial/coverage.json` | per section: assigned items and figures, every review round, whether it was approved |
+| `work/tutorial/editorial.json` | each whole-tutorial editorial round: assessment, cross-section issues, which sections were revised |
 | `work/tutorial/outline.json` | the storyline, sections, plans, and item placement (and any items the brief excluded) |
 | `work/drafts/<unit>.tex`, `<unit>.items.json` | the fact-checked draft and content inventory of each seed unit |
 | `work/<source>/triage.json` | the rating and reason for every distinct video frame |
@@ -211,6 +233,8 @@ Precedence: built-in defaults → `.env`/environment → CLI flags.
 | `--ground` / `--no-ground` | `VITEX_GROUND` | research tools + citations, on by default |
 | `--research-iterations` | — | research rounds per pass (default 16) |
 | `--review-rounds` | — | review+revise rounds per section (default 2; 0 = off) |
+| `--editorial-rounds` | — | whole-tutorial editing rounds (default 2; 0 = off) |
+| `--parallel` | `VITEX_PARALLEL` | independent Claude requests run at once (default 6; 1 = sequential) |
 | `--prompt-cache` / `--no-prompt-cache` | `VITEX_PROMPT_CACHE` | prompt caching, on by default |
 | `--transcriber` | `VITEX_TRANSCRIBER` | `whisper` (default) or `aws` |
 | `--whisper-model` | `VITEX_WHISPER_MODEL` | `tiny`…`large-v3` |

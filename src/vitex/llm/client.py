@@ -21,6 +21,7 @@ import io
 import json
 import logging
 import random
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -231,8 +232,13 @@ class Usage:
 @dataclass
 class UsageLog:
     by_model: dict[str, Usage] = field(default_factory=dict)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def add(self, model: str, usage, seconds: float) -> Usage:
+        with self._lock:  # requests run on several threads
+            return self._add(model, usage, seconds)
+
+    def _add(self, model: str, usage, seconds: float) -> Usage:
         u = self.by_model.setdefault(_short(model), Usage())
         inp = int(getattr(usage, "input_tokens", 0) or 0)
         read = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
@@ -287,16 +293,24 @@ class ClaudeClient:
         self.model = cfg.model
         self._client = self._build_client(cfg)
         self.usage = UsageLog()
-        self._stage = ""
+        self._local = threading.local()  # stage labels are per thread
+
+    @property
+    def _stage(self) -> str:
+        local = self.__dict__.get("_local")
+        return getattr(local, "stage", "") if local is not None else ""
 
     @contextmanager
     def stage(self, label: str):
-        """Label the requests made inside this block in the per-request log."""
-        previous, self._stage = self._stage, label
+        """Label the requests made inside this block (on this thread) in the log."""
+        if "_local" not in self.__dict__:
+            self._local = threading.local()
+        previous = self._stage
+        self._local.stage = label
         try:
             yield
         finally:
-            self._stage = previous
+            self._local.stage = previous
 
     @staticmethod
     def _build_client(cfg: Config):
@@ -411,7 +425,7 @@ class ClaudeClient:
                 if getattr(b, "type", None) == "tool_use":
                     tool_input = dict(b.input)
                     out = dispatch(b.name, tool_input)
-                    log.info("  research: %s(%s) -> %d chars", b.name, tool_input.get("query") or tool_input.get("url") or "", len(out))
+                    log.info("  research %s%s(%s) -> %d chars", f"[{self._stage}] " if self._stage else "", b.name, tool_input.get("query") or tool_input.get("url") or "", len(out))
                     results.append({"type": "tool_result", "tool_use_id": b.id, "content": out})
             if round_no == max_iterations:
                 results.append({"type": "text", "text": _BUDGET_EXHAUSTED})
@@ -474,7 +488,7 @@ class ClaudeClient:
                     if getattr(b, "type", None) == "tool_use":
                         tool_input = dict(b.input)
                         out_text = dispatch(b.name, tool_input)
-                        log.info("  research: %s(%s) -> %d chars", b.name, tool_input.get("query") or tool_input.get("url") or "", len(out_text))
+                        log.info("  research %s%s(%s) -> %d chars", f"[{self._stage}] " if self._stage else "", b.name, tool_input.get("query") or tool_input.get("url") or "", len(out_text))
                         results.append({"type": "tool_result", "tool_use_id": b.id, "content": out_text})
                 results.append(
                     {
@@ -630,7 +644,7 @@ class ClaudeClient:
     def _log_request(self, model: str, resp, seconds: float) -> None:
         """One line per request: stage, model, time, tokens, stop reason, run total."""
         if not hasattr(self, "usage"):  # clients built without __init__ (tests)
-            self.usage, self._stage = UsageLog(), ""
+            self.usage = UsageLog()
         usage = getattr(resp, "usage", None)
         self.usage.add(model, usage, seconds)
         inp = int(getattr(usage, "input_tokens", 0) or 0)

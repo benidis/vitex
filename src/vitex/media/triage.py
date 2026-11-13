@@ -23,7 +23,7 @@ from vitex.errors import LLMError
 from vitex.llm.client import ClaudeClient, ImageRef, staged
 from vitex.llm.prompts import TRIAGE_SCHEMA, TRIAGE_SYSTEM, triage_user
 from vitex.models import Frame, FrameNote, Segment, _fmt_timestamp
-from vitex.utils import fingerprint, read_cached, write_cached
+from vitex.utils import fingerprint, read_cached, run_parallel, write_cached
 
 log = logging.getLogger("vitex")
 
@@ -75,9 +75,11 @@ def triage_frames(
         return notes
 
     batches = [frames[i : i + cfg.triage_batch] for i in range(0, len(frames), cfg.triage_batch)]
-    log.info("Frame triage: %d frames in %d batches (%s)", len(frames), len(batches), cfg.effective_triage_model)
-    for n, batch in enumerate(batches, 1):
-        names = {f.path.name for f in batch}
+    log.info("Frame triage: %d frames in %d batches (%s, %d at a time)",
+             len(frames), len(batches), cfg.effective_triage_model, cfg.parallel)
+
+    def rate(n: int) -> dict:
+        batch = batches[n - 1]
         lines = "\n".join(
             f"- {f.path.name} (shown at {f.timestamp_text}); narration: "
             f"\"{_narration_near(segments, f.timestamp)[:600]}\""
@@ -88,11 +90,10 @@ def triage_frames(
         batch_cache = workdir / "triage" / f"batch_{n:03d}.json"
         batch_key = fingerprint(key, lines)
         cached_batch = read_cached(batch_cache, batch_key, cfg.force)
-        result: dict | None = json.loads(cached_batch) if cached_batch is not None else None
+        if cached_batch is not None:
+            return json.loads(cached_batch)
         images = [ImageRef(path=f.path, label=f.path.name, caption_hint=f.timestamp_text) for f in batch]
         for attempt in range(1, cfg.generation_attempts + 1):
-            if result is not None:
-                break
             try:
                 with staged(client, f"triage {n}/{len(batches)}"):
                     result = client.complete_structured(
@@ -104,14 +105,16 @@ def triage_frames(
                         model=cfg.effective_triage_model,
                         max_tokens=8192,
                     )
-                break
             except LLMError as exc:
                 log.warning("Triage batch %d/%d failed (%s); attempt %d/%d", n, len(batches), exc, attempt, cfg.generation_attempts)
-        if result is None:
-            raise LLMError(f"Frame triage failed for batch {n} after {cfg.generation_attempts} attempts.")
-        if cached_batch is None:
+                continue
             write_cached(batch_cache, batch_key, json.dumps(result, ensure_ascii=False))
+            return result
+        raise LLMError(f"Frame triage failed for batch {n} after {cfg.generation_attempts} attempts.")
 
+    results = run_parallel(rate, list(range(1, len(batches) + 1)), cfg.parallel)
+    for batch, result in zip(batches, results):
+        names = {f.path.name for f in batch}
         order = {f.path.name: i for i, f in enumerate(batch)}
         for entry in result.get("frames", []):
             if isinstance(entry, dict) and entry.get("name") in names:

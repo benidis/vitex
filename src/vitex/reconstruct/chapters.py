@@ -29,7 +29,7 @@ from vitex.llm.prompts import (
 from vitex.models import Figure, SeedUnit
 from vitex.output.latex import cite_contexts, complete_bibliography, referenced_figures
 from vitex.reconstruct.seeds import figure_lines, viewable
-from vitex.utils import fingerprint, read_cached, write_cached
+from vitex.utils import fingerprint, read_cached, run_parallel, write_cached
 
 log = logging.getLogger("vitex")
 
@@ -155,11 +155,15 @@ def image_refs(figures: list[Figure]) -> list[ImageRef]:
 
 
 def draft_seeds(client: ClaudeClient, units: list[SeedUnit], cfg: Config) -> dict[str, str]:
-    """Produce (and cache) the fact-checked LaTeX draft of every seed unit."""
+    """Produce (and cache) the fact-checked LaTeX draft of every seed unit.
+
+    Units are independent, so they are drafted ``cfg.parallel`` at a time.
+    """
     cache_dir = cfg.workdir / "drafts"
     system = draft_system(cfg.ground, cfg.guide)
-    drafts: dict[str, str] = {}
-    for n, unit in enumerate(units, 1):
+
+    def one(n: int) -> str:
+        unit = units[n - 1]
         what = f"Draft {n}/{len(units)} [{unit.id}]"
         user = draft_user(
             kind=unit.kind,
@@ -174,8 +178,7 @@ def draft_seeds(client: ClaudeClient, units: list[SeedUnit], cfg: Config) -> dic
         latex = read_cached(cache, key, cfg.force)
         if latex is not None:
             log.info("%s: cached", what)
-            drafts[unit.id] = latex
-            continue
+            return latex
 
         log.info(
             "%s: drafting (%s, %d chars, %d figures)%s",
@@ -190,10 +193,14 @@ def draft_seeds(client: ClaudeClient, units: list[SeedUnit], cfg: Config) -> dic
                 cfg.generation_attempts,
             )
         latex = without_sentinel(latex, DRAFT_END)
-        log.info("%s: uses %d of %d attached figures", what, len(referenced_figures(latex)), len(images))
+        log.info("%s: done (%d chars, uses %d of %d attached figures)",
+                 what, len(latex), len(referenced_figures(latex)), len(images))
         write_cached(cache, key, latex)
-        drafts[unit.id] = latex
-    return drafts
+        return latex
+
+    log.info("Drafting %d seed units, %d at a time", len(units), cfg.parallel)
+    latexes = run_parallel(one, list(range(1, len(units) + 1)), cfg.parallel)
+    return {u.id: latex for u, latex in zip(units, latexes)}
 
 
 _BIB_BATCH = 12  # cite keys resolved per research loop
@@ -226,9 +233,9 @@ def build_bibliography(
     def check(bib: str) -> str | None:
         return None if _BIB_BODY_RE.search(bib) else "no complete thebibliography environment"
 
-    bodies: list[str] = []
-    for n, batch in enumerate(batches, 1):
+    def one(n: int) -> str:
         what = f"Bibliography {n}/{len(batches)}"
+        batch = batches[n - 1]
         user = bibliography_user(title, {k: contexts[k] for k in batch})
         cache = cfg.tutorial_dir / f"bibliography_{n:02d}.tex"
         key = pass_key(cfg, "bibliography", BIBLIOGRAPHY_SYSTEM, user)
@@ -245,7 +252,9 @@ def build_bibliography(
         else:
             log.info("%s: cached", what)
         m = _BIB_BODY_RE.search(part)
-        bodies.append(m.group(1).strip() if m else "")
+        return m.group(1).strip() if m else ""
+
+    bodies = run_parallel(one, list(range(1, len(batches) + 1)), cfg.parallel)
 
     merged = "\\begin{thebibliography}{99}\n" + "\n\n".join(bodies) + "\n\\end{thebibliography}"
     bibliography, missing = complete_bibliography(merged, keys)

@@ -88,6 +88,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--chunk-minutes", type=float, help="Transcript minutes per video seed unit."
     )
     run.add_argument(
+        "--editorial-rounds",
+        type=int,
+        help="Rounds of whole-tutorial editing after sections are written (default: 2; 0 disables).",
+    )
+    run.add_argument(
+        "--parallel",
+        type=int,
+        help="Independent Claude requests to run at once (default: 6; 1 = sequential).",
+    )
+    run.add_argument(
         "--review-rounds",
         type=int,
         help="Review+revision rounds per section (default: 2; 0 disables review).",
@@ -131,6 +141,8 @@ def _config_from_args(args: argparse.Namespace) -> Config:
         "triage_model": args.triage_model,
         "min_frame_value": args.min_frame_value,
         "review_rounds": args.review_rounds,
+        "editorial_rounds": args.editorial_rounds,
+        "parallel": args.parallel,
         "outdir": args.outdir,
         "workdir": args.workdir,
         "provider": args.provider,

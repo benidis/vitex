@@ -19,9 +19,10 @@ Stages:
     6. split into seed units; draft each (fact-checked)  -> work/drafts/<unit>.tex
     7. inventory every item of content                   -> work/drafts/<unit>.items.json
     8. outline placing every item                        -> work/tutorial/outline.json
-    9. write + review + revise each section              -> work/tutorial/sections/
-   10. resolve \\cite keys into a bibliography            -> work/tutorial/bibliography.tex
-   11. stage figures, write .tex, build PDF              -> output/<stem>/<stem>.{tex,pdf}
+    9. write + review + revise each section (parallel)   -> work/tutorial/sections/
+   10. editor reads the whole; fix flagged sections      -> work/tutorial/editorial/
+   11. resolve \\cite keys into a bibliography            -> work/tutorial/bibliography_*.tex
+   12. stage figures, write .tex, build PDF              -> output/<stem>/<stem>.{tex,pdf}
 """
 
 from __future__ import annotations
@@ -56,6 +57,8 @@ from vitex.reconstruct import (
     build_outline,
     document_units,
     draft_seeds,
+    edit_tutorial,
+    section_jobs,
     video_units,
     write_sections,
 )
@@ -179,7 +182,11 @@ class Pipeline:
         items, summaries = build_inventory(client, units, drafts, cfg)
         log.info("Inventory: %d content items to place", len(items))
         outline = build_outline(client, units, items, summaries, list(figures.values()), cfg)
-        sections = write_sections(client, outline, items, drafts, units, figures, cfg)
+        jobs = section_jobs(outline, items, drafts, units, figures)
+        sections = write_sections(client, jobs, figures, cfg)
+        # Holistic pass: an editor reads the whole tutorial and the sections with
+        # cross-section problems are revised.
+        sections = edit_tutorial(client, outline, items, sections, jobs, cfg)
 
         title = cfg.title or outline.title or (titles[0] if len(titles) == 1 else "Tutorial")
         stem = safe_stem(cfg.name or title)

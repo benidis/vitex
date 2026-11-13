@@ -73,6 +73,9 @@ class Config:
     # Generations per pass when a response fails validation (empty, truncated,
     # malformed). After the last one the run stops — it never skips content.
     generation_attempts: int = 3
+    # Independent requests (triage batches, drafts, inventories, sections,
+    # bibliography batches) run this many at a time.
+    parallel: int = 6
 
     # --- grounding / research ----------------------------------------------
     # When true, the model may call web/arXiv research tools while writing so the
@@ -105,6 +108,9 @@ class Config:
     doc_unit_chars: int = 24000  # max characters of a document per seed unit
     # Rounds of review (coverage + step-by-step rigor) and revision per section.
     review_rounds: int = 2
+    # Rounds in which an editor reads the whole assembled tutorial and the
+    # sections with cross-section problems are revised (0 disables).
+    editorial_rounds: int = 2
     # Outline attempts to place every content item before the remainder is
     # attached deterministically (content is never dropped).
     outline_attempts: int = 3
@@ -148,6 +154,7 @@ class Config:
             fix_model=_env("VITEX_FIX_MODEL"),
             triage_model=_env("VITEX_TRIAGE_MODEL"),
             effort=_env("VITEX_EFFORT", "high"),
+            parallel=int(_env("VITEX_PARALLEL", str(cls.parallel))),
             aws_region=_env("AWS_REGION", "us-east-1"),
             aws_profile=_env("VITEX_AWS_PROFILE"),
             anthropic_api_key=_env("ANTHROPIC_API_KEY"),

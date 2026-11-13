@@ -8,12 +8,36 @@ import logging
 import re
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence, TypeVar
 
 from vitex.errors import DependencyError, VitexError
 
 log = logging.getLogger("vitex")
+
+T = TypeVar("T")
+R = TypeVar("R")
+
+
+def run_parallel(fn: Callable[[T], R], items: Sequence[T], workers: int) -> list[R]:
+    """Apply ``fn`` to ``items`` on up to ``workers`` threads; results keep input order.
+
+    Every task runs to completion even if another one fails, so the work that
+    did finish is cached for the next run; the first error is raised afterwards.
+    """
+    if workers <= 1 or len(items) <= 1:
+        return [fn(item) for item in items]
+    with ThreadPoolExecutor(max_workers=min(workers, len(items))) as pool:
+        futures = [pool.submit(fn, item) for item in items]
+        errors = [f.exception() for f in futures]
+    first = next((e for e in errors if e is not None), None)
+    if first is not None:
+        failed = sum(e is not None for e in errors)
+        if failed > 1:
+            log.error("%d of %d parallel tasks failed; raising the first", failed, len(items))
+        raise first
+    return [f.result() for f in futures]
 
 
 def setup_logging(verbose: bool = False) -> None:

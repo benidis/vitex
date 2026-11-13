@@ -10,7 +10,7 @@ from vitex import pipeline as pipeline_mod
 from vitex.config import Config
 from vitex.errors import LLMError
 from vitex.llm.client import ClaudeClient
-from vitex.llm.prompts import INVENTORY_SCHEMA, OUTLINE_SCHEMA, REVIEW_SCHEMA
+from vitex.llm.prompts import EDITORIAL_SCHEMA, INVENTORY_SCHEMA, OUTLINE_SCHEMA, REVIEW_SCHEMA
 from vitex.output.build import content_losses
 from vitex.pipeline import Pipeline
 
@@ -104,13 +104,16 @@ class ScriptedModel:
         if schema is OUTLINE_SCHEMA:
             ids = re.findall(r"^(I\d+\.\d+) \|", text, re.MULTILINE)
             figs = re.findall(r"^\s+(\S+\.png) \|", text, re.MULTILINE)
-            sec = lambda t, r, i, f=(): {"title": t, "role": r, "question": "q", "motivation": "m",  # noqa: E731
-                                         "plan": ["p"], "items": list(i), "figures": list(f), "leads_to": "l"}
-            return {"title": "Attention From Scratch", "reader_background": "b", "notation": [],
+            sec = lambda t, r, i, f=(): {"title": t, "role": r, "purpose": "why here",  # noqa: E731
+                                         "plan": ["p"], "items": list(i), "figures": list(f)}
+            return {"title": "Attention From Scratch", "storyline": "s", "reader_background": "b", "notation": [],
                     "sections": [sec("Introduction", "introduction", []), sec("Core", "core", ids, figs),
                                  sec("Summary", "summary", [])]}
         if schema is REVIEW_SCHEMA:
             return {"approved": True, "missing_items": [], "issues": []}
+        if schema is EDITORIAL_SCHEMA:
+            assert "% ===== SECTION 2: Core" in text  # the editor sees the whole document
+            return {"assessment": "reads well", "issues": []}
         raise AssertionError("unexpected structured pass")
 
 
@@ -134,6 +137,7 @@ def test_end_to_end_document_seed(tmp_path, monkeypatch):
     staged = list((result.tex_path.parent / "figures").iterdir())
     assert len(staged) == 1 and staged[0].name in tex  # the document's figure survived end to end
     assert (tmp_path / "work" / "tutorial" / "coverage.json").exists()
+    assert (tmp_path / "work" / "tutorial" / "editorial.json").exists()
 
 
 def test_conform_decodes_stringified_nesting_and_rejects_mismatches():

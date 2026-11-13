@@ -3,7 +3,7 @@
 The inventory is the checklist that guarantees nothing is dropped: each draft is
 broken into items (concepts, derivations, results, examples, figures, ...) with
 ids. The outline must place every item id in a section, in a pedagogical order
-with motivation and a step-by-step plan per section. It is checked in code; the
+with a purpose and a step-by-step plan per section. It is checked in code; the
 model gets ``outline_attempts`` tries to fix unplaced or unknown ids, and any
 item still unplaced after that is attached deterministically (to the section
 holding the most items from the same seed unit) — content is never dropped.
@@ -29,7 +29,7 @@ from vitex.llm.prompts import (
 )
 from vitex.models import Figure, SeedUnit
 from vitex.reconstruct.chapters import dump, generate_structured, pass_key, structured_valid
-from vitex.utils import read_cached, write_cached
+from vitex.utils import read_cached, run_parallel, write_cached
 
 log = logging.getLogger("vitex")
 
@@ -55,21 +55,18 @@ class Item:
 class Section:
     title: str
     role: str
-    question: str
-    motivation: str
+    purpose: str  # planning note: what it establishes and why it is needed here
     plan: list[str]
     items: list[str]
     figures: list[str]
-    leads_to: str
     new_material: list[str] = field(default_factory=list)
 
     def spec(self) -> str:
         plan = "\n".join(f"  {i}. {step}" for i, step in enumerate(self.plan, 1))
         new = "\n".join(f"  - {m}" for m in self.new_material) or "  (none)"
         return (
-            f"Title: {self.title}\nRole: {self.role}\nQuestion it answers: {self.question}\n"
-            f"Why the reader needs it now: {self.motivation}\nPlan:\n{plan}\n"
-            f"Bridging/prerequisite material to add:\n{new}\nLeads to: {self.leads_to}"
+            f"Title: {self.title}\nRole: {self.role}\nPurpose (planning note): {self.purpose}\n"
+            f"Plan:\n{plan}\nBridging/prerequisite material to add:\n{new}"
         )
 
 
@@ -88,7 +85,24 @@ class Outline:
         lines = [f"Storyline: {self.storyline}", f"Reader background: {self.reader_background}"]
         for i, s in enumerate(self.sections):
             flag = ">>> " if i == mark else "    "
-            lines.append(f"{flag}{i + 1}. {s.title} [{s.role}] — answers: {s.question} — leads to: {s.leads_to}")
+            lines.append(f"{flag}{i + 1}. {s.title} [{s.role}] — {s.purpose}")
+        return "\n".join(lines)
+
+    def map(self, items: dict[str, "Item"], mark: int | None = None) -> str:
+        """Every section with its purpose and the content items it covers.
+
+        Gives each writer (and the editor) a concrete view of the whole: what the
+        reader already has before a section and what comes after it.
+        """
+        lines = [f"Storyline: {self.storyline}", f"Reader background: {self.reader_background}"]
+        for i, s in enumerate(self.sections):
+            flag = ">>> " if i == mark else "    "
+            lines.append(f"{flag}{i + 1}. {s.title} [{s.role}] — {s.purpose}")
+            covered = [f"{items[x].title} ({items[x].kind})" for x in s.items if x in items]
+            if covered:
+                lines.append("        covers: " + "; ".join(covered))
+            if s.new_material:
+                lines.append("        adds: " + "; ".join(s.new_material))
         return "\n".join(lines)
 
     def notation_text(self) -> str:
@@ -103,12 +117,13 @@ class Outline:
             Section(
                 title=str(s.get("title", "")).strip(),
                 role=str(s.get("role", "core")),
-                question=str(s.get("question", "")),
-                motivation=str(s.get("motivation", "")),
+                # Outlines cached before "purpose" existed carried question/motivation.
+                purpose=str(s.get("purpose") or " ".join(
+                    str(s.get(k, "")) for k in ("question", "motivation") if s.get(k)
+                )),
                 plan=[str(p) for p in s.get("plan", [])],
                 items=[str(i).strip() for i in s.get("items", [])],
                 figures=[str(f).strip() for f in s.get("figures", [])],
-                leads_to=str(s.get("leads_to", "")),
                 new_material=[str(m) for m in s.get("new_material", [])],
             )
             for s in d.get("sections", [])
@@ -139,7 +154,8 @@ def build_inventory(
     def check(data: dict) -> str | None:
         return None if data.get("items") else "no items extracted"
 
-    for u_idx, unit in enumerate(units, 1):
+    def one(u_idx: int) -> dict:
+        unit = units[u_idx - 1]
         what = f"Inventory {u_idx}/{len(units)} [{unit.id}]"
         user = inventory_user(unit.source_title, unit.position, drafts[unit.id])
         cache = cache_dir / f"{unit.id}.items.json"
@@ -148,19 +164,23 @@ def build_inventory(
         if cached is not None:
             data = json.loads(cached)
             log.info("%s: cached (%d items)", what, len(data["items"]))
-        else:
-            with staged(client, f"inventory {u_idx}/{len(units)}"):
-                data = structured_valid(
-                    lambda: generate_structured(
-                        client, cfg, system=INVENTORY_SYSTEM, text=user, schema=INVENTORY_SCHEMA,
-                        description="Record the complete inventory of the draft.", research_allowed=False,
-                    ),
-                    check,
-                    what,
-                    cfg.generation_attempts,
-                )
-            write_cached(cache, key, dump(data))
-            log.info("%s: %d items", what, len(data["items"]))
+            return data
+        with staged(client, f"inventory {u_idx}/{len(units)}"):
+            data = structured_valid(
+                lambda: generate_structured(
+                    client, cfg, system=INVENTORY_SYSTEM, text=user, schema=INVENTORY_SCHEMA,
+                    description="Record the complete inventory of the draft.", research_allowed=False,
+                ),
+                check,
+                what,
+                cfg.generation_attempts,
+            )
+        write_cached(cache, key, dump(data))
+        log.info("%s: %d items", what, len(data["items"]))
+        return data
+
+    inventories = run_parallel(one, list(range(1, len(units) + 1)), cfg.parallel)
+    for u_idx, (unit, data) in enumerate(zip(units, inventories), 1):
         summaries[unit.id] = str(data.get("summary", ""))
         for n, raw in enumerate(data["items"], 1):
             items.append(
