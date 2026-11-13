@@ -298,3 +298,27 @@ def test_length_checks_and_shrink_guard():
     # Normal revisions may not cut more than 15%; an over-long section may be cut toward its target.
     assert min_kept_words(1000, 1000) == 850
     assert min_kept_words(2000, 1000) == 1000  # max(0.7 * target, half of current)
+
+
+def test_allocation_follows_topic_roles_and_coverage_is_enforced():
+    from vitex.reconstruct.outline import allocate, topic_problems
+
+    topics = [{"topic": "PPO", "role": "core"}, {"topic": "TRPO", "role": "core"},
+              {"topic": "A2C", "role": "supporting"}, {"topic": "Noisy Nets", "role": "brief"}]
+    outline = Outline(title="T", reader_background="b", notation=[], sections=[
+        _sec("Intro", "introduction", []), _sec("PPO", "core", []), _sec("Variants", "core", []),
+        _sec("Summary", "summary", []),
+    ])
+    outline.sections[1].topics = ["ppo", "TRPO"]  # names match case-insensitively
+    outline.sections[2].topics = ["A2C", "Noisy Nets", "Made Up"]
+    assert topic_problems(outline, topics) == ([], ["Made Up"])
+    outline.sections[1].topics = ["PPO"]
+    assert topic_problems(outline, topics)[0] == ["TRPO"]  # uncovered core topic -> outline retried
+    outline.sections[1].topics = ["PPO", "TRPO"]
+
+    lines = allocate(outline, topics, 10000)
+    intro, core, variants, summary = (s.target_words for s in outline.sections)
+    assert (intro, summary) == (500, 400)  # fixed frame shares
+    assert core > 3 * variants  # two core topics vs one supporting + one brief
+    assert abs(sum((intro, core, variants, summary)) - 10000) <= 2
+    assert any("Allocation of 10000 words" in line for line in lines)

@@ -111,10 +111,10 @@ class ScriptedModel:
             assert "about 6400 words" in text  # budget = 3000 + 2500 (core) + 900 (supporting)
             ids = re.findall(r"^(I\d+\.\d+) \|", text, re.MULTILINE)
             figs = re.findall(r"^\s+(\S+\.png) \|", text, re.MULTILINE)
-            sec = lambda t, r, i, f=(): {"title": t, "role": r, "purpose": "why here",  # noqa: E731
-                                         "plan": ["p"], "items": list(i), "figures": list(f)}
+            sec = lambda t, r, i, f=(), tp=(): {"title": t, "role": r, "purpose": "why here",  # noqa: E731
+                                                 "plan": ["p"], "items": list(i), "figures": list(f), "topics": list(tp)}
             return {"title": "Attention From Scratch", "storyline": "s", "reader_background": "b", "notation": [],
-                    "sections": [sec("Introduction", "introduction", []), sec("Core", "core", ids, figs),
+                    "sections": [sec("Introduction", "introduction", []), sec("Core", "core", ids, figs, ["Scaled dot-product attention", "Multi-query attention"]),
                                  sec("Summary", "summary", [])]}
         if schema is REVIEW_SCHEMA:
             return {"approved": True, "missing_items": [], "issues": []}

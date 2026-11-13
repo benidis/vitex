@@ -63,6 +63,7 @@ class Section:
     new_material: list[str] = field(default_factory=list)
     depth: str = "core"  # core | supporting
     target_words: int = 0
+    topics: list[str] = field(default_factory=list)  # literature-map topics covered
 
     def spec(self) -> str:
         plan = "\n".join(f"  {i}. {step}" for i, step in enumerate(self.plan, 1))
@@ -131,6 +132,7 @@ class Outline:
                 new_material=[str(m) for m in s.get("new_material", [])],
                 depth=str(s.get("depth") or "core"),
                 target_words=int(s.get("target_words") or 0),
+                topics=[str(t).strip() for t in s.get("topics", [])],
             )
             for s in d.get("sections", [])
         ]
@@ -265,6 +267,66 @@ def repair_outline(outline: Outline, items: list[Item], figures: set[str]) -> li
     return changes
 
 
+# Words per literature-map topic by role: the relative weights that decide how
+# the budget is split (and, in the survey, how large the default budget is).
+ROLE_WORDS = {"core": 2500, "supporting": 900, "brief": 120}
+# Fixed shares for the frame of the tutorial.
+_FRAME_SHARE = {"introduction": 0.05, "summary": 0.04}
+_MIN_SECTION_WORDS = 300
+
+
+def _norm(name: str) -> str:
+    return " ".join(name.lower().split())
+
+
+def topic_problems(outline: Outline, topics: list[dict]) -> tuple[list[str], list[str]]:
+    """Return (core/supporting map topics no section covers, unknown section topics)."""
+    known = {_norm(t["topic"]): t for t in topics}
+    listed = {_norm(x) for s in outline.sections for x in s.topics}
+    uncovered = [t["topic"] for t in topics if t.get("role") in ("core", "supporting") and _norm(t["topic"]) not in listed]
+    unknown = sorted({x for s in outline.sections for x in s.topics if _norm(x) not in known})
+    return uncovered, unknown
+
+
+def allocate(outline: Outline, topics: list[dict], budget: int) -> list[str]:
+    """Set every section's word target from the roles of the topics it covers.
+
+    The introduction and summary get fixed shares; the rest of the budget is
+    split in proportion to each section's topic weight (core 2500 : supporting
+    900 : brief 120; a topic listed in several sections is split between them),
+    so important topics get proportionally more room by construction. Sections
+    that cover no map topic keep the outline's estimate within the remainder.
+    Returns a printable allocation table.
+    """
+    role = {_norm(t["topic"]): t.get("role", "brief") for t in topics}
+    listings: dict[str, int] = {}
+    for s in outline.sections:
+        for x in {_norm(x) for x in s.topics}:
+            listings[x] = listings.get(x, 0) + 1
+    frame = {i: _FRAME_SHARE[s.role] * budget for i, s in enumerate(outline.sections) if s.role in _FRAME_SHARE}
+    weights: dict[int, float] = {}
+    for i, s in enumerate(outline.sections):
+        if i in frame:
+            continue
+        w = sum(ROLE_WORDS[role[x]] / listings[x] for x in {_norm(x) for x in s.topics} if x in role)
+        weights[i] = w if w > 0 else float(max(s.target_words, _MIN_SECTION_WORDS))
+    pool = budget - sum(frame.values())
+    total_w = sum(weights.values()) or 1.0
+    for i, s in enumerate(outline.sections):
+        share = frame[i] if i in frame else pool * weights[i] / total_w
+        s.target_words = max(_MIN_SECTION_WORDS, round(share))
+
+    by_depth: dict[str, int] = {}
+    for s in outline.sections:
+        key = s.role if s.role in _FRAME_SHARE else s.depth
+        by_depth[key] = by_depth.get(key, 0) + s.target_words
+    total = sum(by_depth.values()) or 1
+    lines = [f"Allocation of {budget} words (~{budget // 450} pages):"]
+    lines += [f"  {k}: {v} words ({100 * v / total:.0f}%)" for k, v in sorted(by_depth.items(), key=lambda kv: -kv[1])]
+    lines += [f"  {i + 1:2}. {s.target_words:6} words  [{s.depth:10}] {s.title}" for i, s in enumerate(outline.sections)]
+    return lines
+
+
 def fit_budget(outline: Outline, items: list[Item], budget: int) -> list[str]:
     """Make the section targets add up to ``budget`` words; return what changed.
 
@@ -302,6 +364,7 @@ def build_outline(
     cfg: Config,
     budget_words: int,
     landscape: str = "",
+    topics: list[dict] | None = None,
 ) -> Outline:
     """Design the tutorial's outline, guaranteed to place every item."""
     fig_names = {f.name for f in figures}
@@ -341,25 +404,35 @@ def build_outline(
                 cfg.generation_attempts,
             )
         outline = Outline.from_dict(data)
+        uncovered, bad_topics = topic_problems(outline, topics) if topics else ([], [])
         if not cfg.guide and outline.excluded:
             # Exclusion is only legitimate when the author's brief asks for it.
             log.warning("Outline excluded %d item(s) without an author's brief; restoring them", len(outline.excluded))
             outline.excluded = []
         missing, unknown = outline_problems(outline, items, fig_names)
-        if not missing and not unknown:
+        if not missing and not unknown and not uncovered and not bad_topics:
             break
         log.warning(
-            "Outline attempt %d/%d: %d unplaced item(s), %d unknown reference(s)",
-            attempt, cfg.outline_attempts, len(missing), len(unknown),
+            "Outline attempt %d/%d: %d unplaced item(s), %d unknown reference(s), %d uncovered topic(s), %d unknown topic(s)",
+            attempt, cfg.outline_attempts, len(missing), len(unknown), len(uncovered), len(bad_topics),
         )
-        text = user + "\n\n" + outline_retry_user(dump(data), ", ".join(missing), ", ".join(unknown))
+        text = user + "\n\n" + outline_retry_user(
+            dump(data), ", ".join(missing), ", ".join(unknown), "; ".join(uncovered), "; ".join(bad_topics)
+        )
     if outline is None:  # pragma: no cover - loop runs at least once
         raise LLMError("Outline: no outline produced.")
 
     for change in repair_outline(outline, items, fig_names):
         log.warning("Outline fix: %s", change)
-    for change in fit_budget(outline, items, budget_words):
-        log.info("Outline budget: %s", change)
+    if topics:
+        uncovered, _ = topic_problems(outline, topics)
+        for name in uncovered:
+            log.warning("Outline: map topic not covered by any section: %s", name)
+        for line in allocate(outline, topics, budget_words):
+            log.info("%s", line)
+    else:
+        for change in fit_budget(outline, items, budget_words):
+            log.info("Outline budget: %s", change)
     for e in outline.excluded:
         log.warning("Outline: item %s left out per the author's brief: %s", e.get("id"), e.get("reason", ""))
     if cfg.title:

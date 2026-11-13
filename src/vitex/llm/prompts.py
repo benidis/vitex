@@ -517,14 +517,18 @@ OUTLINE RULES
   new_material of the section where they belong. The introduction includes a
   concise overview of the field and its literature (the main families of
   methods, how they developed, and the key papers), based on the map.
-- Give each section a "depth" and a "target_words". Depth is "core" for steps
-  of the main line (full treatment) or "supporting" for variants, refinements,
-  and alternatives (compact but complete, rule 8). The targets must add up to
-  the total length budget given below, allocated by role and difficulty: core
-  sections get most of it. Items marked brief become a few sentences or a table
-  row inside a section. Group related variants into one section (with a
-  comparison table) rather than one section per variant, and prefer subsections
-  to separate sections; most sections should be roughly 1,500-6,000 words.
+- For each section, list under "topics" the literature-map topics it covers,
+  using their names exactly as written in the map. Every CORE and SUPPORTING
+  topic must appear in a section — put each where it is actually developed;
+  brief topics go where they are mentioned. Section lengths are computed from
+  the roles of these topics, so the listing decides how the budget is spent.
+- Give each section a "depth": "core" for steps of the main line (full
+  treatment) or "supporting" for variants, refinements, and alternatives
+  (compact but complete, rule 8), and a "target_words" estimate (used only for
+  sections that cover no map topic). Items marked brief become a few sentences
+  or a table row inside a section. Group related variants into one section
+  (with a comparison table) rather than one section per variant, and prefer
+  subsections to separate sections.
 - The first section is the introduction (role "introduction": the motivating
   problem, what the reader will learn, assumed background, and a roadmap); the
   last is the summary (role "summary": the throughline and key takeaways; it
@@ -570,9 +574,14 @@ OUTLINE_SCHEMA = {
                     "new_material": {"type": "array", "items": {"type": "string"}},
                     "figures": {"type": "array", "items": {"type": "string"}},
                     "depth": {"type": "string", "enum": ["core", "supporting"]},
-                    "target_words": {"type": "integer", "description": "Target length of the section in words."},
+                    "target_words": {"type": "integer", "description": "Length estimate in words."},
+                    "topics": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Literature-map topics covered here, named exactly as in the map.",
+                    },
                 },
-                "required": ["title", "role", "purpose", "plan", "items", "figures", "depth", "target_words"],
+                "required": ["title", "role", "purpose", "plan", "items", "figures", "depth", "target_words", "topics"],
             },
         },
         "excluded_items": {
@@ -614,9 +623,11 @@ Content inventory (id | kind | importance | title | detail):
 """.strip()
 
 
-def outline_retry_user(previous: str, missing: str, unknown: str) -> str:
+def outline_retry_user(previous: str, missing: str, unknown: str, uncovered: str = "", bad_topics: str = "") -> str:
     return f"""
 Your outline did not satisfy the rules. Return the COMPLETE corrected outline.
+{f"These core/supporting topics of the literature map are covered by no section — list each under the section that develops it (adding it there if needed): {uncovered}" if uncovered else ""}
+{f"These section topics are not in the literature map; use the map's exact names: {bad_topics}" if bad_topics else ""}
 {f"These item ids were not assigned to any section — place each where it belongs in the flow: {missing}" if missing else ""}
 {f"These ids/figure names do not exist; remove or correct them: {unknown}" if unknown else ""}
 

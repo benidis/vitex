@@ -192,7 +192,7 @@ class Pipeline:
         log.info("Length budget: %d words (~%d pages)%s", budget, budget // WORDS_PER_PAGE,
                  " from --pages" if cfg.pages else " from the survey's topics")
         outline = build_outline(
-            client, units, items, summaries, list(figures.values()), cfg, budget, survey.landscape()
+            client, units, items, summaries, list(figures.values()), cfg, budget, survey.landscape(), survey.topics
         )
         jobs = section_jobs(outline, items, drafts, units, figures)
         sections = write_sections(client, jobs, figures, cfg)

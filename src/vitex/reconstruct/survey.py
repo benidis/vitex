@@ -24,15 +24,16 @@ from vitex.llm.client import ClaudeClient, staged
 from vitex.llm.prompts import SURVEY_SCHEMA, survey_system, survey_user
 from vitex.models import SeedUnit
 from vitex.reconstruct.chapters import dump, generate_structured, pass_key, structured_valid
-from vitex.reconstruct.outline import Item
+from vitex.reconstruct.outline import ROLE_WORDS, Item
 from vitex.utils import read_cached, write_cached
 
 log = logging.getLogger("vitex")
 
-# Words per topic by role, plus the introduction and summary. Calibrated so a
-# core method gets its full treatment (setup, intuition, derivation, algorithm,
-# and — where it matters — cost and an example) in a few pages.
-WORDS_PER_TOPIC = {"core": 2500, "supporting": 900, "brief": 120}
+# Words per topic by role (shared with the outline's allocation), plus the
+# introduction and summary. Calibrated so a core method gets its full treatment
+# (setup, intuition, derivation, algorithm, and — where it matters — cost and
+# an example) in a few pages.
+WORDS_PER_TOPIC = ROLE_WORDS
 _FRAME_WORDS = 3000  # introduction (with the overview of the field) + summary
 WORDS_PER_PAGE = 450
 
