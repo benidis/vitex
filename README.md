@@ -236,7 +236,7 @@ Two ways to change it:
   filesystem-safe), else the first source's title.
 - **`--guide` / `--guide-file`** is an **author's brief** added to the plan and
   every writing pass: scope, focus, emphasis, audience, special instructions.
-  Example briefs live in [briefs/](briefs/).
+  Keep your briefs in `briefs/` (git-ignored).
 - **`--pages`** sets the budget; without it the plan uses what the scope needs,
   up to a ceiling sized from the survey.
 
@@ -326,7 +326,6 @@ src/vitex/
   reconstruct/  seeds, survey, plan, chapters (drafts + bibliography),
                 outline (inventory + outline), writer (sections, review, editor)
   output/       latex (preamble, assembly, figures), build (compile, repair, layout)
-briefs/         example author's briefs (--guide-file)
 tests/          unit tests, plus end-to-end runs with a scripted model
 ```
 

@@ -37,3 +37,6 @@ venv/
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+
+# author briefs (local only)
+/briefs/
